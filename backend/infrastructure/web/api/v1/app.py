@@ -22,6 +22,6 @@ def create_app() -> FastAPI:
     
     @app.get('/')
     async def root():
-        return {'message': 'Welcome to LingoStream Backend'}
+        return {'message': 'Hey there! Welcome to LingoStream Backend'}
     
     return app
