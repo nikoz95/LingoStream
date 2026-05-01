@@ -1,6 +1,7 @@
 import uvicorn
 from infrastructure.web.api.v1.app import create_app
 from config.settings import settings
+from config.di_container import container  # Add this import
 
 # Create the app instance
 app = create_app()

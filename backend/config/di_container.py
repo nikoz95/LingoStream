@@ -3,6 +3,7 @@ from sqlalchemy.orm import Session
 from infrastructure.database.postgres.session import SessionLocal
 from infrastructure.database.postgres.user_repository_impl import UserRepositoryImpl
 from domain.repositories.user_repository import UserRepository
+from infrastructure.database.postgres.epub_parser import EPUBParser
 
 
 class DIContainer:
@@ -27,6 +28,11 @@ class DIContainer:
         """Get user repository instance"""
         db_session = self.get_db_session()
         return UserRepositoryImpl(db_session)
+    
+    def get_epub_parser(self) -> EPUBParser:
+        """Get EPUB parser instance"""
+        db_session = self.get_db_session()
+        return EPUBParser(db_session)
 
 
 # Global DI container instance
