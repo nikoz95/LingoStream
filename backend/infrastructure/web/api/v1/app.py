@@ -16,8 +16,9 @@ def create_app() -> FastAPI:
         # Ensure ORM tables exist before handling requests.
         Base.metadata.create_all(bind=engine)
 
-    # Include routers
+    # Include routers (/auth/* and /api/v1/auth/* — same handlers)
     app.include_router(auth_router)
+    app.include_router(auth_router, prefix="/api/v1")
     
     @app.get('/')
     async def root():
