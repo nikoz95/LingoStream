@@ -37,3 +37,4 @@ class Paragraph(Base):
     
     # Relationship with book
     book = relationship("Book", back_populates="paragraphs")
+

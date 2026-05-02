@@ -9,6 +9,12 @@ services:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U user -d lingostream"]
+      interval: 2s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
 
   redis:
     image: redis:7
@@ -20,12 +26,14 @@ services:
     ports:
       - "8000:8000"
     environment:
-      - DB_URL=postgresql://user:password@db:5432/lingostream
+      - DB_URL=postgresql+asyncpg://user:password@db:5432/lingostream
       - JWT_SECRET=your-secret-key-here
       - REDIS_URL=redis://redis:6379/0
     depends_on:
-      - db
-      - redis
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_started
     volumes:
       - .:/app
 

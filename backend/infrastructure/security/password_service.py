@@ -1,32 +1,18 @@
-import hashlib
-import secrets
-from typing import Tuple
+from passlib.context import CryptContext
+
+
+pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 
 class PasswordService:
-    """Service for hashing and verifying passwords"""
-    
+    """Service for hashing and verifying passwords using passlib bcrypt"""
+
     @staticmethod
-    def hash_password(password: str) -> Tuple[str, str]:
-        """
-        Hash a password with a salt.
-        Returns tuple of (hashed_password, salt)
-        """
-        salt = secrets.token_hex(16)
-        pwdhash = hashlib.pbkdf2_hmac('sha256', 
-                                      password.encode('utf-8'), 
-                                      salt.encode('utf-8'), 
-                                      100000)
-        hashed = pwdhash.hex()
-        return hashed, salt
-    
+    def hash_password(password: str) -> str:
+        """Hash a password and return the hashed string"""
+        return pwd_context.hash(password)
+
     @staticmethod
-    def verify_password(password: str, stored_hash: str, salt: str) -> bool:
-        """
-        Verify a password against its hash
-        """
-        pwdhash = hashlib.pbkdf2_hmac('sha256',
-                                      password.encode('utf-8'),
-                                      salt.encode('utf-8'),
-                                      100000)
-        return pwdhash.hex() == stored_hash
+    def verify_password(plain_password: str, hashed_password: str) -> bool:
+        """Verify a plain password against its hash"""
+        return pwd_context.verify(plain_password, hashed_password)

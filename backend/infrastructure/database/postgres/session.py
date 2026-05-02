@@ -1,26 +1,26 @@
-
-from sqlalchemy import create_engine
-from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
+from sqlalchemy.orm import DeclarativeBase
 from config.settings import settings
 
 
-# For sync PostgreSQL connection, use psycopg2-binary instead of asyncpg
-# If you want to use async, you need to change the whole architecture
-engine = create_engine(
+engine = create_async_engine(
     settings.DB_URL,
-    # Add pool settings to avoid connection issues
     pool_pre_ping=True,
-    pool_recycle=3600
+    pool_recycle=3600,
+    echo=settings.DEBUG,
 )
-SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
-Base = declarative_base()
+
+async_session_factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
 
-def get_db():
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
+class Base(DeclarativeBase):
+    pass
+
+
+async def get_db() -> AsyncSession:
+    async with async_session_factory() as session:
+        try:
+            yield session
+        finally:
+            await session.close()
 
