@@ -13,3 +13,5 @@ email-validator==2.2.0
 httpx==0.28.1
 bcrypt==4.2.1
 ebooklib==0.18
+beautifulsoup4==4.12.2
+openai==1.58.0

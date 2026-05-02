@@ -1,34 +1,539 @@
-from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy.orm import Session
+import os
+from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, status
+from sqlalchemy.ext.asyncio import AsyncSession
+from typing import List
+
 from infrastructure.database.postgres.session import get_db
 from infrastructure.database.postgres.epub_parser import EPUBParser
-from infrastructure.database.postgres.models import Book
+from infrastructure.database.postgres.book_repository_impl import (
+    BookRepositoryImpl,
+    ChapterRepositoryImpl,
+    ParagraphRepositoryImpl,
+)
+from infrastructure.web.api.v1.schemas.book_schemas import (
+    RegisterBookRequest,
+    RegisterBookResponse,
+    BookDetailResponse,
+    BookListItem,
+    ChapterResponse,
+    ChapterParagraphsResponse,
+    ParagraphResponse,
+    TranslatePassageRequest,
+    TranslatePassageResponse,
+)
+from infrastructure.web.api.v1.dependencies import get_current_user
+from infrastructure.ai.translation_service import TranslationService
+from domain.entities.user import User
+from domain.entities.book import Book, Chapter, Paragraph
 
-router = APIRouter(prefix="/books", tags=["Books"])
+router = APIRouter(tags=["books"])
 
-@router.post("/parse-epub")
-async def parse_epub(
+# ── Background ──
+
+
+async def _parse_book_background(
     file_path: str,
-    db: Session = Depends(get_db)
+    book_id: int,
+    chapter_repo: ChapterRepositoryImpl,
+    paragraph_repo: ParagraphRepositoryImpl,
+    parser: EPUBParser,
 ):
-    """Parse EPUB file and save paragraphs to database"""
-    try:
-        parser = EPUBParser(db)
-        # Create book entry
-        book = Book(
-            title="Parsed Book",
-            author="Unknown",
-            file_path=file_path
+    """
+    Background task: parses all unparsed chapters of a book one by one.
+    Runs after book registration so user can immediately start reading Chapter 1
+    while remaining chapters are processed.
+    """
+    chapters = await chapter_repo.get_chapters_by_book(book_id)
+    global_index = 0
+
+    for chapter in chapters:
+        try:
+            paragraph_tuples = parser.parse_chapter(file_path, chapter.spine_index, global_index)
+            if paragraph_tuples:
+                paragraphs = [
+                    Paragraph(
+                        book_id=book_id,
+                        chapter_id=chapter.id,
+                        content=content,
+                        index=idx,
+                    )
+                    for idx, content in paragraph_tuples
+                ]
+                await paragraph_repo.add_paragraphs(paragraphs)
+                await chapter_repo.mark_chapter_parsed(
+                    chapter.id,
+                    seq_start=global_index,
+                    seq_end=global_index + len(paragraphs) - 1,
+                    count=len(paragraphs),
+                )
+                global_index += len(paragraphs)
+        except Exception:
+            # If a chapter fails, skip it — user can request it manually
+            continue
+
+
+@router.post("/register", response_model=RegisterBookResponse, status_code=status.HTTP_201_CREATED)
+async def register_book(
+    request: RegisterBookRequest,
+    background_tasks: BackgroundTasks,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Register a book from a local file path.
+    - Extracts metadata + TOC only (< 1s)
+    - Returns immediately with book info and chapter list
+    - Chapter 1 gets parsed right away so user can start reading
+    - Remaining chapters are parsed in background
+    """
+    file_path = request.file_path
+
+    # Validate file exists
+    if not os.path.isfile(file_path):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"File not found at path: {file_path}",
         )
-        db.add(book)
-        db.commit()
-        db.refresh(book)
-        
-        # Parse and save paragraphs
-        parser.save_book_paragraphs(book.id, file_path)
-        
-        return {"message": "EPUB parsed successfully", "book_id": book.id}
-    
+
+    parser = EPUBParser()
+    book_repo = BookRepositoryImpl(db)
+    chapter_repo = ChapterRepositoryImpl(db)
+    paragraph_repo = ParagraphRepositoryImpl(db)
+
+    # Step 1: Extract metadata (fast)
+    try:
+        metadata = parser.extract_metadata(file_path)
     except Exception as e:
-        db.rollback()
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Failed to read EPUB file: {str(e)}",
+        )
+
+    # Step 2: Register book
+    book = Book(
+        title=metadata["title"],
+        author=metadata["author"],
+        file_path=file_path,
+        language=metadata["language"],
+        status="indexed",
+    )
+    book = await book_repo.add_book(book)
+
+    # Step 3: Extract TOC (fast)
+    try:
+        toc = parser.extract_toc(file_path)
+    except Exception as e:
+        # If TOC fails, still keep the book
+        toc = []
+
+    # Step 4: Create chapter records
+    chapters = [
+        Chapter(
+            book_id=book.id,
+            title=ch["title"],
+            spine_index=idx,
+        )
+        for idx, ch in enumerate(toc)
+    ]
+
+    if not chapters:
+        # Fallback: at least one chapter
+        chapters = [Chapter(
+            book_id=book.id,
+            title=book.title,
+            spine_index=0,
+        )]
+
+    chapters = await chapter_repo.add_chapters(chapters)
+
+    # Step 5: Update total chapters
+    book.total_chapters = len(chapters)
+    await book_repo.update_book_status(book.id, "ready")
+
+    # Step 6: Parse Chapter 1 immediately (lazy — user can start reading)
+    if chapters:
+        first_chapter = chapters[0]
+        try:
+            paragraph_tuples = parser.parse_chapter(file_path, first_chapter.spine_index)
+            if paragraph_tuples:
+                paragraphs = [
+                    Paragraph(
+                        book_id=book.id,
+                        chapter_id=first_chapter.id,
+                        content=content,
+                        index=idx,
+                    )
+                    for idx, content in paragraph_tuples
+                ]
+                await paragraph_repo.add_paragraphs(paragraphs)
+                await chapter_repo.mark_chapter_parsed(
+                    first_chapter.id,
+                    seq_start=0,
+                    seq_end=len(paragraphs) - 1,
+                    count=len(paragraphs),
+                )
+        except Exception:
+            # Chapter 1 parse failure is non-fatal — user can retry
+            pass
+
+    # Step 7: Schedule background parsing for remaining chapters
+    background_tasks.add_task(
+        _parse_book_background,
+        file_path,
+        book.id,
+        chapter_repo,
+        paragraph_repo,
+        parser,
+    )
+
+    return RegisterBookResponse(
+        id=book.id,
+        title=book.title,
+        author=book.author,
+        total_chapters=book.total_chapters,
+        language=book.language,
+        status=book.status,
+        created_at=book.created_at,
+    )
+
+
+@router.get("", response_model=List[BookListItem])
+async def list_books(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """List all registered books (lightweight)."""
+    book_repo = BookRepositoryImpl(db)
+    books = await book_repo.get_books_by_user(current_user.id)
+    return [
+        BookListItem(
+            id=b.id,
+            title=b.title,
+            author=b.author,
+            total_chapters=b.total_chapters,
+            language=b.language,
+            status=b.status,
+            created_at=b.created_at,
+        )
+        for b in books
+    ]
+
+
+@router.get("/{book_id}", response_model=BookDetailResponse)
+async def get_book_detail(
+    book_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Get book details with chapter list."""
+    book_repo = BookRepositoryImpl(db)
+    chapter_repo = ChapterRepositoryImpl(db)
+
+    book = await book_repo.get_book_by_id(book_id)
+    if book is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Book not found",
+        )
+
+    chapters = await chapter_repo.get_chapters_by_book(book_id)
+
+    return BookDetailResponse(
+        id=book.id,
+        title=book.title,
+        author=book.author,
+        file_path=book.file_path,
+        total_chapters=book.total_chapters,
+        language=book.language,
+        status=book.status,
+        chapters=[
+            ChapterResponse(
+                id=ch.id,
+                book_id=ch.book_id,
+                title=ch.title,
+                spine_index=ch.spine_index,
+                sequence_start=ch.sequence_start,
+                sequence_end=ch.sequence_end,
+                paragraph_count=ch.paragraph_count,
+                is_parsed=ch.is_parsed,
+                created_at=ch.created_at,
+            )
+            for ch in chapters
+        ],
+        created_at=book.created_at,
+        updated_at=book.updated_at,
+    )
+
+
+@router.get("/{book_id}/chapters", response_model=List[ChapterResponse])
+async def get_book_chapters(
+    book_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Get all chapters for a book."""
+    chapter_repo = ChapterRepositoryImpl(db)
+    chapters = await chapter_repo.get_chapters_by_book(book_id)
+    return [
+        ChapterResponse(
+            id=ch.id,
+            book_id=ch.book_id,
+            title=ch.title,
+            spine_index=ch.spine_index,
+            sequence_start=ch.sequence_start,
+            sequence_end=ch.sequence_end,
+            paragraph_count=ch.paragraph_count,
+            is_parsed=ch.is_parsed,
+            created_at=ch.created_at,
+        )
+        for ch in chapters
+    ]
+
+
+@router.get("/{book_id}/chapters/{chapter_id}", response_model=ChapterParagraphsResponse)
+async def get_chapter_paragraphs(
+    book_id: int,
+    chapter_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Get a chapter with its paragraphs.
+    If the chapter hasn't been parsed yet, it will be parsed on-demand (lazy parse).
+    """
+    chapter_repo = ChapterRepositoryImpl(db)
+    paragraph_repo = ParagraphRepositoryImpl(db)
+    book_repo = BookRepositoryImpl(db)
+    parser = EPUBParser()
+
+    chapter = await chapter_repo.get_chapter_by_id(chapter_id)
+    if chapter is None or chapter.book_id != book_id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Chapter not found",
+        )
+
+    book = await book_repo.get_book_by_id(book_id)
+    if book is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Book not found",
+        )
+
+    # Lazy parse: if chapter hasn't been parsed, parse it now
+    if not chapter.is_parsed:
+        try:
+            # Find the global index — it's the end of the previous parsed chapter + 1
+            all_chapters = await chapter_repo.get_chapters_by_book(book_id)
+            global_start = 0
+            for prev_ch in all_chapters:
+                if prev_ch.spine_index < chapter.spine_index and prev_ch.is_parsed:
+                    global_start = max(global_start, prev_ch.sequence_end + 1)
+
+            paragraph_tuples = parser.parse_chapter(
+                book.file_path,
+                chapter.spine_index,
+                global_start,
+            )
+
+            if paragraph_tuples:
+                paragraphs = [
+                    Paragraph(
+                        book_id=book_id,
+                        chapter_id=chapter_id,
+                        content=content,
+                        index=idx,
+                    )
+                    for idx, content in paragraph_tuples
+                ]
+                await paragraph_repo.add_paragraphs(paragraphs)
+                await chapter_repo.mark_chapter_parsed(
+                    chapter_id,
+                    seq_start=global_start,
+                    seq_end=global_start + len(paragraphs) - 1,
+                    count=len(paragraphs),
+                )
+
+            # Refresh chapter data
+            chapter = await chapter_repo.get_chapter_by_id(chapter_id)
+
+        except Exception as e:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Failed to parse chapter: {str(e)}",
+            )
+
+    # Fetch paragraphs
+    paragraphs = await paragraph_repo.get_paragraphs_by_chapter(chapter_id)
+
+    return ChapterParagraphsResponse(
+        chapter=ChapterResponse(
+            id=chapter.id,
+            book_id=chapter.book_id,
+            title=chapter.title,
+            spine_index=chapter.spine_index,
+            sequence_start=chapter.sequence_start,
+            sequence_end=chapter.sequence_end,
+            paragraph_count=chapter.paragraph_count,
+            is_parsed=chapter.is_parsed,
+            created_at=chapter.created_at,
+        ),
+        paragraphs=[
+            ParagraphResponse(
+                id=p.id,
+                book_id=p.book_id,
+                chapter_id=p.chapter_id,
+                content=p.content,
+                index=p.index,
+                phonetic_transcription=p.phonetic_transcription,
+            )
+            for p in paragraphs
+        ],
+    )
+
+
+@router.post(
+    "/{book_id}/chapters/{chapter_id}/translate",
+    response_model=TranslatePassageResponse,
+)
+async def translate_chapter_passage(
+    book_id: int,
+    chapter_id: int,
+    request: TranslatePassageRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Translate a selected passage from the chapter into Georgian,
+    with context awareness.
+
+    The endpoint:
+    1. Fetches the selected paragraphs + surrounding context paragraphs.
+    2. Sends the passage + context to an LLM with a literary translation prompt.
+    3. Returns the original + translation + context for the frontend to display.
+
+    The LLM can be configured via environment variables:
+      - LLM_PROVIDER: "openai" or "local" (default: local)
+      - LLM_API_KEY: OpenAI API key (for "openai")
+      - LLM_MODEL: model name (default: mistral:7b)
+      - LLM_BASE_URL: base URL for local/OpenAI-compatible API
+    """
+    paragraph_repo = ParagraphRepositoryImpl(db)
+    chapter_repo = ChapterRepositoryImpl(db)
+    book_repo = BookRepositoryImpl(db)
+
+    # Validate chapter and book
+    chapter = await chapter_repo.get_chapter_by_id(chapter_id)
+    if chapter is None or chapter.book_id != book_id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Chapter not found",
+        )
+
+    book = await book_repo.get_book_by_id(book_id)
+    if book is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Book not found",
+        )
+
+    # Fetch all paragraphs for this chapter
+    all_paragraphs = await paragraph_repo.get_paragraphs_by_chapter(chapter_id)
+
+    if not all_paragraphs:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Chapter has no parsed paragraphs yet. Please fetch the chapter first to trigger lazy parsing.",
+        )
+
+    # Build a map from paragraph index -> content for O(1) lookup
+    paragraph_map = {p.index: p.content for p in all_paragraphs}
+    paragraph_indices = sorted(paragraph_map.keys())
+
+    # Validate selected indices
+    selected = sorted(request.selected_indices)
+    if not selected:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="selected_indices must not be empty",
+        )
+
+    invalid = [i for i in selected if i not in paragraph_map]
+    if invalid:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid paragraph indices: {invalid}. Available indices: {paragraph_indices}",
+        )
+
+    # Build passage text (concatenate selected paragraphs)
+    passage_parts = [paragraph_map[i] for i in selected]
+    passage = "\n\n".join(passage_parts)
+
+    # Build context windows
+    min_selected = min(selected)
+    max_selected = max(selected)
+    all_idx_set = set(paragraph_indices)
+
+    left_ctx_indices = []
+    ctx_before = min_selected - 1
+    for _ in range(request.left_context_count):
+        if ctx_before in all_idx_set:
+            left_ctx_indices.append(ctx_before)
+            ctx_before -= 1
+        else:
+            break
+    left_ctx_indices.reverse()  # put them in reading order
+
+    right_ctx_indices = []
+    ctx_after = max_selected + 1
+    for _ in range(request.right_context_count):
+        if ctx_after in all_idx_set:
+            right_ctx_indices.append(ctx_after)
+            ctx_after += 1
+        else:
+            break
+
+    left_context = "\n\n".join(paragraph_map[i] for i in left_ctx_indices)
+    right_context = "\n\n".join(paragraph_map[i] for i in right_ctx_indices)
+
+    # Call translation service
+    translator = TranslationService()
+    try:
+        translation = await translator.translate(
+            passage,
+            left_context=left_context,
+            right_context=right_context,
+            book_title=book.title,
+            source_language=request.source_language,
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"Translation failed: {str(e)}",
+        )
+
+    return TranslatePassageResponse(
+        original=passage,
+        translation=translation,
+        left_context=left_context,
+        right_context=right_context,
+    )
+
+
+@router.delete("/{book_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_book(
+    book_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Delete a book and all its associated data."""
+    book_repo = BookRepositoryImpl(db)
+
+    book = await book_repo.get_book_by_id(book_id)
+    if book is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Book not found",
+        )
+
+    await book_repo.delete_book(book_id)

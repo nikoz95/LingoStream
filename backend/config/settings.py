@@ -14,6 +14,13 @@ class Settings(BaseSettings):
     # ── Redis ──
     REDIS_URL: str = "redis://localhost:6379/0"
 
+    # ── LLM / Translation ──
+    LLM_PROVIDER: str = "local"               # "openai" or "local"
+    LLM_API_KEY: str = ""                     # OpenAI API key (only for "openai")
+    LLM_MODEL: str = "mistral:7b"             # e.g. "gpt-4o-mini", "mistral:7b", "llama3.2"
+    LLM_BASE_URL: str = "http://host.docker.internal:11434"  # base URL for local/OpenAI-compatible API
+    LLM_MAX_CONTEXT_CHARS: int = 3000         # max chars for left/right context windows
+
     # ── App ──
     DEBUG: bool = False
     APP_NAME: str = "LingoStream"
