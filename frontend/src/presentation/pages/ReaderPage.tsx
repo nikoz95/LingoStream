@@ -15,7 +15,7 @@ export function ReaderPage() {
   const { themeId, setTheme } = useThemeStore();
   const {
     translate, result, isLoading: isTranslating, error: translateError,
-    selectedIndices, toggleSelection, clearSelection, clearResult,
+    selectedIndices, translatedIndices, toggleSelection, clearSelection, clearResult,
   } = useTranslation();
 
   const [showSidebar, setShowSidebar] = useState(true);
@@ -44,6 +44,7 @@ export function ReaderPage() {
     }
   }, [currentChapter, bookId, fetchParagraphs, clearResult, clearSelection]);
 
+
   const currentChapterIndex = currentChapter
     ? chapters.findIndex((c) => c.id === currentChapter.id)
     : -1;
@@ -62,7 +63,6 @@ export function ReaderPage() {
 
   const handleTranslate = useCallback(async () => {
     if (!bookId || !currentChapter || selectedIndices.length === 0) return;
-    setShowTranslation(true);
     await translate(
       bookId,
       currentChapter.id,
@@ -204,17 +204,20 @@ export function ReaderPage() {
                 {paragraphs.map((para) => {
                   const paraIdx = para.index;
                   const isSelected = selectedIndices.includes(paraIdx);
+                  const isTranslated = translatedIndices.includes(paraIdx);
                   return (
                     <div
                       key={para.id}
                       onClick={() => toggleSelection(paraIdx)}
                       className="group relative p-3 -mx-3 rounded-xl cursor-pointer transition-all duration-200"
-                      style={{
-                        backgroundColor: isSelected ? 'var(--ls-bg-hover)' : 'transparent',
-                        border: isSelected ? '2px solid var(--ls-accent)' : '2px solid transparent',
-                        lineHeight: '1.6',
-                        fontSize: '1.125rem',
-                      }}
+                  style={{
+                    position: 'relative',
+                    backgroundColor: isSelected ? 'var(--ls-bg-hover)' : isTranslated ? 'rgba(34, 197, 94, 0.06)' : 'transparent',
+                    border: isSelected ? '2px solid var(--ls-accent)' : '2px solid transparent',
+                    borderLeft: isTranslated ? '4px solid rgba(34, 197, 94, 0.5)' : isSelected ? '2px solid var(--ls-accent)' : '2px solid transparent',
+                    lineHeight: '1.6',
+                    fontSize: '1.125rem',
+                  }}
                     >
                       <p style={{ color: 'var(--ls-text)' }}>
                         {para.content}
@@ -224,10 +227,21 @@ export function ReaderPage() {
                         className="absolute -top-3 right-2 opacity-0 group-hover:opacity-100 transition-opacity duration-200 flex gap-1"
                       >
                         <button
-                          onClick={(e) => {
+                          onClick={async (e) => {
                             e.stopPropagation();
                             toggleSelection(paraIdx);
                             setShowTranslation(true);
+                            clearResult();
+                            if (bookId && currentChapter) {
+                              await translate(
+                                bookId,
+                                currentChapter.id,
+                                [paraIdx],
+                                leftCtx,
+                                rightCtx,
+                                currentBook?.language || 'en'
+                              );
+                            }
                           }}
                           className="p-1.5 rounded-lg text-xs font-medium backdrop-blur-xl transition-all hover:scale-110"
                           style={{
@@ -362,12 +376,20 @@ export function ReaderPage() {
               <button
                 onClick={handleTranslate}
                 disabled={selectedIndices.length === 0 || isTranslating}
-                className="w-full py-2.5 rounded-xl text-sm font-medium text-white transition-all duration-200 disabled:opacity-50 mb-4"
+                className="w-full py-2.5 rounded-xl text-sm font-medium text-white transition-all duration-200 disabled:opacity-50 mb-4 flex items-center justify-center gap-2"
                 style={{ backgroundColor: 'var(--ls-accent)' }}
               >
-                {isTranslating
-                  ? 'Translating...'
-                  : `Translate ${selectedIndices.length} paragraph${selectedIndices.length !== 1 ? 's' : ''}`}
+                {isTranslating ? (
+                  <>
+                    <svg className="animate-spin h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                    </svg>
+                    Translating...
+                  </>
+                ) : selectedIndices.length === 1
+                  ? 'Translate'
+                  : `Translate ${selectedIndices.length} paragraphs`}
               </button>
 
               {/* Results */}

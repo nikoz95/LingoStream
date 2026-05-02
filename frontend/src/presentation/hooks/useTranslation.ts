@@ -18,6 +18,7 @@ interface UseTranslationReturn {
   isLoading: boolean;
   error: string | null;
   selectedIndices: number[];
+  translatedIndices: number[];
   toggleSelection: (index: number) => void;
   clearSelection: () => void;
   clearResult: () => void;
@@ -25,6 +26,7 @@ interface UseTranslationReturn {
 
 export function useTranslation(): UseTranslationReturn {
   const [selectedIndices, setSelectedIndices] = useState<number[]>([]);
+  const [translatedIndices, setTranslatedIndices] = useState<number[]>([]);
   const [result, setResult] = useState<TranslationResult | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -43,6 +45,7 @@ export function useTranslation(): UseTranslationReturn {
   const clearSelection = useCallback(() => {
     log.debug('clearSelection');
     setSelectedIndices([]);
+    setTranslatedIndices([]);
   }, []);
 
   const translate = useCallback(
@@ -75,6 +78,10 @@ export function useTranslation(): UseTranslationReturn {
           translationPreview: translationResult.translation?.substring(0, 100),
         });
         setResult(translationResult);
+        setTranslatedIndices((prev) => {
+          const merged = new Set([...prev, ...indices]);
+          return [...merged].sort((a, b) => a - b);
+        });
       } catch (err) {
         const msg = err instanceof Error ? err.message : 'Translation failed';
         log.error('translate FAILED', { error: msg, err });
@@ -98,6 +105,7 @@ export function useTranslation(): UseTranslationReturn {
     isLoading,
     error,
     selectedIndices,
+    translatedIndices,
     toggleSelection,
     clearSelection,
     clearResult,
