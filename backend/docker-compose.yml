@@ -29,9 +29,29 @@ services:
       - DB_URL=postgresql+asyncpg://user:password@db:5432/lingostream
       - JWT_SECRET=your-secret-key-here
       - REDIS_URL=redis://redis:6379/0
-      - LLM_MODEL=qwen2.5-coder:14b
-      - LLM_BASE_URL=http://host.docker.internal:11434
-      - LLM_PROVIDER=local
+
+      # ── Translation / LLM Provider ──
+      #
+      # Option 1: Local Ollama (default)
+      #- LLM_PROVIDER=local
+      #- LLM_MODEL=qwen2.5-coder:14b
+      #- LLM_BASE_URL=http://host.docker.internal:11434
+      #
+      # Option 2: Google Gemini (via OpenAI-compatible endpoint)
+      # Uncomment these lines and comment out Option 1 to use Gemini:
+      - LLM_PROVIDER=openai
+      - LLM_MODEL=gemini-2.5-flash
+      - LLM_BASE_URL=https://generativelanguage.googleapis.com/v1beta/openai/
+      - LLM_API_KEY=AIzaSyDW8lmC1dkDlp6_HkXSO9VUON6Gpri-AF0
+      #
+      # Option 3: OpenAI
+      # - LLM_PROVIDER=openai
+      # - LLM_MODEL=gpt-4o-mini
+      # - LLM_API_KEY=${OPENAI_API_KEY}
+      # (LLM_BASE_URL is not needed for standard OpenAI)
+      #
+      # Option 4: Any other OpenAI-compatible service (Groq, Together, DeepSeek, etc.)
+      # Set LLM_PROVIDER=openai, LLM_MODEL, LLM_BASE_URL, and LLM_API_KEY accordingly.
     depends_on:
       db:
         condition: service_healthy

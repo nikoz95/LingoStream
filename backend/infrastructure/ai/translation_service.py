@@ -108,7 +108,10 @@ class TranslationService:
         try:
             import openai
 
-            client = openai.AsyncOpenAI(api_key=self._api_key)
+            client = openai.AsyncOpenAI(
+                api_key=self._api_key,
+                base_url=self._base_url if self._base_url else None,
+            )
 
             system_prompt = self._build_system_prompt(book_title, source_language)
             user_prompt = self._build_user_prompt(passage, left_context, right_context)
