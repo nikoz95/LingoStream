@@ -13,11 +13,24 @@ from bs4 import BeautifulSoup
 
 
 class EPUBParser:
-    """Parser for EPUB files with lazy chapter-by-chapter processing."""
+    """Parser for EPUB files with lazy chapter-by-chapter processing.
+
+    Caches the opened EpubBook so that multiple calls to parse_chapter()
+    do NOT re-read the entire EPUB file each time.
+    """
+
+    def __init__(self):
+        self._book_cache: dict[str, epub.EpubBook] = {}
+
+    def _get_book(self, file_path: str) -> epub.EpubBook:
+        """Return cached EpubBook or open+parse it once."""
+        if file_path not in self._book_cache:
+            self._book_cache[file_path] = epub.read_epub(file_path)
+        return self._book_cache[file_path]
 
     def extract_metadata(self, file_path: str) -> dict:
         """Extract book metadata (title, author, language) without parsing content."""
-        book = epub.read_epub(file_path)
+        book = self._get_book(file_path)
         return {
             "title": self._get_metadata(book, "title", "Unknown Title"),
             "author": self._get_metadata(book, "creator", "Unknown Author"),
@@ -29,7 +42,7 @@ class EPUBParser:
         Extract Table of Contents (chapters) from EPUB without parsing paragraph content.
         Returns list of {title, spine_index} dicts.
         """
-        book = epub.read_epub(file_path)
+        book = self._get_book(file_path)
         chapters = []
 
         # Try TOC first (nav.xhtml / toc.ncx)
@@ -81,7 +94,7 @@ class EPUBParser:
         Parse paragraphs from a single chapter (spine item) only.
         Returns list of (global_index, content) tuples.
         """
-        book = epub.read_epub(file_path)
+        book = self._get_book(file_path)
 
         # Find the document item at the given spine index
         target_item = None
@@ -104,7 +117,7 @@ class EPUBParser:
     def parse_chapter_range(
         self, file_path: str, spine_start: int, spine_end: int, start_global_index: int = 0
     ) -> List[Tuple[int, str]]:
-        """Parse paragraphs from a range of chapters."""
+        """Parse paragraphs from a range of chapters (uses cached book)."""
         all_paragraphs: List[Tuple[int, str]] = []
         current_index = start_global_index
 

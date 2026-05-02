@@ -1,17 +1,23 @@
 import os
-from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, status
+import uuid
+import logging
+from pathlib import Path
+from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, UploadFile, File, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import List
 
 from infrastructure.database.postgres.session import get_db
 from infrastructure.database.postgres.epub_parser import EPUBParser
+from infrastructure.database.postgres.pdf_parser import PDFParser
+
+logger = logging.getLogger("book_router")
+logging.basicConfig(level=logging.DEBUG, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
 from infrastructure.database.postgres.book_repository_impl import (
     BookRepositoryImpl,
     ChapterRepositoryImpl,
     ParagraphRepositoryImpl,
 )
 from infrastructure.web.api.v1.schemas.book_schemas import (
-    RegisterBookRequest,
     RegisterBookResponse,
     BookDetailResponse,
     BookListItem,
@@ -26,6 +32,10 @@ from infrastructure.ai.translation_service import TranslationService
 from domain.entities.user import User
 from domain.entities.book import Book, Chapter, Paragraph
 
+# Upload directory — mounted volume or fallback to /tmp
+UPLOAD_DIR = Path(os.getenv("UPLOAD_DIR", "/app/uploads"))
+UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+
 router = APIRouter(tags=["books"])
 
 # ── Background ──
@@ -36,7 +46,7 @@ async def _parse_book_background(
     book_id: int,
     chapter_repo: ChapterRepositoryImpl,
     paragraph_repo: ParagraphRepositoryImpl,
-    parser: EPUBParser,
+    parser,
 ):
     """
     Background task: parses all unparsed chapters of a book one by one.
@@ -74,28 +84,38 @@ async def _parse_book_background(
 
 @router.post("/register", response_model=RegisterBookResponse, status_code=status.HTTP_201_CREATED)
 async def register_book(
-    request: RegisterBookRequest,
-    background_tasks: BackgroundTasks,
+    file: UploadFile = File(...),
+    background_tasks: BackgroundTasks = BackgroundTasks(),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     """
-    Register a book from a local file path.
+    Upload and register an EPUB book.
+    - Saves the file to a permanent upload directory
     - Extracts metadata + TOC only (< 1s)
     - Returns immediately with book info and chapter list
     - Chapter 1 gets parsed right away so user can start reading
     - Remaining chapters are parsed in background
     """
-    file_path = request.file_path
 
-    # Validate file exists
-    if not os.path.isfile(file_path):
+    # Validate file extension
+    filename = file.filename or "unknown.epub"
+    ext = filename.lower().rsplit(".", 1)[-1] if "." in filename else ""
+    if ext not in ("epub", "pdf"):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"File not found at path: {file_path}",
+            detail=f"Unsupported file format: '{filename}'. Only EPUB (.epub) and PDF (.pdf) files are supported.",
         )
 
-    parser = EPUBParser()
+    # Save uploaded file to permanent directory with unique name
+    unique_name = f"{uuid.uuid4()}_{filename}"
+    file_path = str(UPLOAD_DIR / unique_name)
+
+    content = await file.read()
+    Path(file_path).write_bytes(content)
+    await file.close()
+
+    parser = EPUBParser() if ext == "epub" else PDFParser()
     book_repo = BookRepositoryImpl(db)
     chapter_repo = ChapterRepositoryImpl(db)
     paragraph_repo = ParagraphRepositoryImpl(db)
@@ -106,7 +126,7 @@ async def register_book(
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Failed to read EPUB file: {str(e)}",
+            detail=f"Failed to read book file: {str(e)}",
         )
 
     # Step 2: Register book
@@ -290,6 +310,93 @@ async def get_book_chapters(
     ]
 
 
+@router.get("/{book_id}/chapters/{chapter_id}/paragraphs", response_model=List[ParagraphResponse])
+async def get_chapter_paragraphs_flat(
+    book_id: int,
+    chapter_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Get paragraphs for a chapter (flat list).
+    If the chapter hasn't been parsed yet, it will be parsed on-demand (lazy parse).
+    """
+    chapter_repo = ChapterRepositoryImpl(db)
+    paragraph_repo = ParagraphRepositoryImpl(db)
+    book_repo = BookRepositoryImpl(db)
+    # Pick parser based on file extension
+    book = await book_repo.get_book_by_id(book_id)
+    if book is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Book not found",
+        )
+    ext = book.file_path.lower().rsplit(".", 1)[-1] if "." in book.file_path else ""
+    parser = EPUBParser() if ext == "epub" else PDFParser()
+
+    chapter = await chapter_repo.get_chapter_by_id(chapter_id)
+    if chapter is None or chapter.book_id != book_id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Chapter not found",
+        )
+
+    # Lazy parse: if chapter hasn't been parsed, parse it now
+    if not chapter.is_parsed:
+        try:
+            # Find the global index — it's the end of the previous parsed chapter + 1
+            all_chapters = await chapter_repo.get_chapters_by_book(book_id)
+            global_start = 0
+            for prev_ch in all_chapters:
+                if prev_ch.spine_index < chapter.spine_index and prev_ch.is_parsed:
+                    global_start = max(global_start, prev_ch.sequence_end + 1)
+
+            paragraph_tuples = parser.parse_chapter(
+                book.file_path,
+                chapter.spine_index,
+                global_start,
+            )
+
+            if paragraph_tuples:
+                paragraphs = [
+                    Paragraph(
+                        book_id=book_id,
+                        chapter_id=chapter_id,
+                        content=content,
+                        index=idx,
+                    )
+                    for idx, content in paragraph_tuples
+                ]
+                await paragraph_repo.add_paragraphs(paragraphs)
+                await chapter_repo.mark_chapter_parsed(
+                    chapter_id,
+                    seq_start=global_start,
+                    seq_end=global_start + len(paragraphs) - 1,
+                    count=len(paragraphs),
+                )
+
+        except Exception as e:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Failed to parse chapter: {str(e)}",
+            )
+
+    # Fetch paragraphs
+    paragraphs = await paragraph_repo.get_paragraphs_by_chapter(chapter_id)
+
+    return [
+        ParagraphResponse(
+            id=p.id,
+            book_id=p.book_id,
+            chapter_id=p.chapter_id,
+            content=p.content,
+            index=p.index,
+            phonetic_transcription=p.phonetic_transcription,
+        )
+        for p in paragraphs
+    ]
+
+
 @router.get("/{book_id}/chapters/{chapter_id}", response_model=ChapterParagraphsResponse)
 async def get_chapter_paragraphs(
     book_id: int,
@@ -304,7 +411,15 @@ async def get_chapter_paragraphs(
     chapter_repo = ChapterRepositoryImpl(db)
     paragraph_repo = ParagraphRepositoryImpl(db)
     book_repo = BookRepositoryImpl(db)
-    parser = EPUBParser()
+    # Pick parser based on file extension
+    book = await book_repo.get_book_by_id(book_id)
+    if book is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Book not found",
+        )
+    ext = book.file_path.lower().rsplit(".", 1)[-1] if "." in book.file_path else ""
+    parser = EPUBParser() if ext == "epub" else PDFParser()
 
     chapter = await chapter_repo.get_chapter_by_id(chapter_id)
     if chapter is None or chapter.book_id != book_id:
@@ -422,9 +537,16 @@ async def translate_chapter_passage(
     chapter_repo = ChapterRepositoryImpl(db)
     book_repo = BookRepositoryImpl(db)
 
+    logger.info(
+        "translate ENTER book_id=%s chapter_id=%s selected_indices=%s left_context=%d right_context=%d",
+        book_id, chapter_id, request.selected_indices,
+        request.left_context_count, request.right_context_count,
+    )
+
     # Validate chapter and book
     chapter = await chapter_repo.get_chapter_by_id(chapter_id)
     if chapter is None or chapter.book_id != book_id:
+        logger.warning("translate FAIL chapter not found book_id=%s chapter_id=%s", book_id, chapter_id)
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Chapter not found",
@@ -432,27 +554,80 @@ async def translate_chapter_passage(
 
     book = await book_repo.get_book_by_id(book_id)
     if book is None:
+        logger.warning("translate FAIL book not found book_id=%s", book_id)
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Book not found",
         )
 
+    logger.info("translate chapter is_parsed=%s spine_index=%s", chapter.is_parsed, chapter.spine_index)
+
+    # Lazy parse: if chapter hasn't been parsed yet, parse it now
+    if not chapter.is_parsed:
+        ext = book.file_path.lower().rsplit(".", 1)[-1] if "." in book.file_path else ""
+        parser = EPUBParser() if ext == "epub" else PDFParser()
+        logger.info("translate lazy-parsing chapter book_id=%s chapter_id=%s ext=%s", book_id, chapter_id, ext)
+        try:
+            all_chapters = await chapter_repo.get_chapters_by_book(book_id)
+            global_start = 0
+            for prev_ch in all_chapters:
+                if prev_ch.spine_index < chapter.spine_index and prev_ch.is_parsed:
+                    global_start = max(global_start, prev_ch.sequence_end + 1)
+            logger.info("translate lazy-parse global_start=%d", global_start)
+
+            paragraph_tuples = parser.parse_chapter(
+                book.file_path,
+                chapter.spine_index,
+                global_start,
+            )
+            logger.info("translate lazy-parse got %d paragraph tuples", len(paragraph_tuples) if paragraph_tuples else 0)
+
+            if paragraph_tuples:
+                paragraphs = [
+                    Paragraph(
+                        book_id=book_id,
+                        chapter_id=chapter_id,
+                        content=content,
+                        index=idx,
+                    )
+                    for idx, content in paragraph_tuples
+                ]
+                await paragraph_repo.add_paragraphs(paragraphs)
+                await chapter_repo.mark_chapter_parsed(
+                    chapter_id,
+                    seq_start=global_start,
+                    seq_end=global_start + len(paragraphs) - 1,
+                    count=len(paragraphs),
+                )
+                logger.info("translate lazy-parse saved %d paragraphs, seq_range=[%d, %d]",
+                    len(paragraphs), global_start, global_start + len(paragraphs) - 1)
+        except Exception as e:
+            logger.error("translate lazy-parse FAILED book_id=%s chapter_id=%s error=%s", book_id, chapter_id, str(e), exc_info=True)
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Failed to parse chapter: {str(e)}",
+            )
+
     # Fetch all paragraphs for this chapter
     all_paragraphs = await paragraph_repo.get_paragraphs_by_chapter(chapter_id)
+    logger.info("translate fetched %d total paragraphs for chapter", len(all_paragraphs))
 
     if not all_paragraphs:
+        logger.warning("translate FAIL no paragraphs book_id=%s chapter_id=%s", book_id, chapter_id)
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Chapter has no parsed paragraphs yet. Please fetch the chapter first to trigger lazy parsing.",
+            detail="Chapter has no parsed paragraphs yet.",
         )
 
     # Build a map from paragraph index -> content for O(1) lookup
     paragraph_map = {p.index: p.content for p in all_paragraphs}
     paragraph_indices = sorted(paragraph_map.keys())
+    logger.info("translate paragraph indices in DB: %s (len=%d)", paragraph_indices, len(paragraph_indices))
 
     # Validate selected indices
     selected = sorted(request.selected_indices)
     if not selected:
+        logger.warning("translate FAIL empty selected_indices")
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="selected_indices must not be empty",
@@ -460,10 +635,15 @@ async def translate_chapter_passage(
 
     invalid = [i for i in selected if i not in paragraph_map]
     if invalid:
+        logger.warning(
+            "translate FAIL invalid indices %s. Available: %s",
+            invalid, paragraph_indices,
+        )
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Invalid paragraph indices: {invalid}. Available indices: {paragraph_indices}",
         )
+    logger.info("translate selected indices validated: %s", selected)
 
     # Build passage text (concatenate selected paragraphs)
     passage_parts = [paragraph_map[i] for i in selected]
@@ -526,7 +706,9 @@ async def delete_book(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Delete a book and all its associated data."""
+    """Delete a book and all its associated data (chapters, paragraphs, and uploaded file)."""
+    import os
+
     book_repo = BookRepositoryImpl(db)
 
     book = await book_repo.get_book_by_id(book_id)
@@ -536,4 +718,12 @@ async def delete_book(
             detail="Book not found",
         )
 
-    await book_repo.delete_book(book_id)
+    # Delete from database (cascades to chapters & paragraphs via FK)
+    file_path = await book_repo.delete_book(book_id)
+
+    # Delete the uploaded file from disk
+    if file_path and os.path.exists(file_path):
+        try:
+            os.remove(file_path)
+        except OSError:
+            pass  # Non-fatal — file just stays on disk

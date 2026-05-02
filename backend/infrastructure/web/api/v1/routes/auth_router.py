@@ -36,9 +36,9 @@ from domain.entities.user import User
 router = APIRouter(tags=["auth"])
 
 
-@router.post("/register", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
+@router.post("/register", response_model=TokenResponse, status_code=status.HTTP_201_CREATED)
 async def register(request: RegisterRequest, db: AsyncSession = Depends(get_db)):
-    """Register a new user"""
+    """Register a new user and return JWT tokens"""
     user_repo = UserRepositoryImpl(db)
     register_usecase = RegisterUser(user_repo)
     
@@ -51,7 +51,20 @@ async def register(request: RegisterRequest, db: AsyncSession = Depends(get_db))
 
     try:
         result = await register_usecase.execute(register_request)
-        return UserResponse(id=result.id, email=result.email)
+        
+        # Generate tokens (same as login)
+        access_token = JWTService.create_access_token(data={"sub": str(result.id)})
+        refresh_token = JWTService.create_refresh_token(data={"sub": str(result.id)})
+
+        return TokenResponse(
+            access_token=access_token,
+            refresh_token=refresh_token,
+            user=UserResponse(
+                id=result.id,
+                email=result.email,
+                created_at=result.created_at,
+            ),
+        )
     except UserAlreadyExistsError:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,

@@ -65,18 +65,35 @@ class TranslationService:
         Returns:
             Georgian translation of the passage.
         """
+        logger.info(
+            "translate_service ENTER provider=%s model=%s base_url=%s book_title=%s source_language=%s "
+            "passage_len=%d left_ctx_len=%d right_ctx_len=%d",
+            self._provider, self._model, self._base_url,
+            book_title, source_language,
+            len(passage), len(left_context), len(right_context),
+        )
+        logger.debug("translate_service passage[:200]=%s", passage[:200])
+        if left_context:
+            logger.debug("translate_service left_context[:200]=%s", left_context[:200])
+        if right_context:
+            logger.debug("translate_service right_context[:200]=%s", right_context[:200])
+
         if self._provider == "openai":
-            return await self._translate_openai(
+            result = await self._translate_openai(
                 passage, left_context, right_context,
                 book_title, source_language,
             )
         elif self._provider == "local":
-            return await self._translate_local(
+            result = await self._translate_local(
                 passage, left_context, right_context,
                 book_title, source_language,
             )
         else:
             raise ValueError(f"Unsupported LLM provider: {self._provider}")
+
+        logger.info("translate_service SUCCESS result_len=%d", len(result))
+        logger.debug("translate_service result[:200]=%s", result[:200])
+        return result
 
     # ── OpenAI API ──
 
@@ -113,7 +130,11 @@ class TranslationService:
             logger.error(f"OpenAI translation failed: {e}")
             raise
 
-    # ── Local LLM (Ollama / LM Studio / LocalAI) ──
+    # ── Local LLM (Ollama native API) ──
+    #
+    # Uses Ollama's native /api/chat endpoint.
+    # For other OpenAI-compatible local servers (LM Studio, LocalAI),
+    # set LLM_PROVIDER=openai and LLM_BASE_URL to that server's URL.
 
     async def _translate_local(
         self,
@@ -134,23 +155,26 @@ class TranslationService:
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt},
             ],
-            "temperature": 0.3,
-            "max_tokens": 2000,
+            "options": {
+                "temperature": 0.3,
+                "num_predict": 2000,
+            },
             "stream": False,
         }
 
         try:
-            resp = await client.post("/v1/chat/completions", json=payload)
+            # Ollama native API endpoint: POST /api/chat
+            resp = await client.post("/api/chat", json=payload)
             resp.raise_for_status()
             data = resp.json()
-            raw = data["choices"][0]["message"]["content"]
+            raw = data["message"]["content"]
             return self._clean_translation(raw)
 
         except HTTPError as e:
-            logger.error(f"Local LLM HTTP error: {e}")
+            logger.error(f"Local LLM (Ollama) HTTP error: {e}")
             raise
         except (KeyError, IndexError, json.JSONDecodeError) as e:
-            logger.error(f"Local LLM response parse error: {e}")
+            logger.error(f"Local LLM (Ollama) response parse error: {e}")
             raise
 
     # ── Prompt builders ──

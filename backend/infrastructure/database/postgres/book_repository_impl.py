@@ -86,11 +86,22 @@ class BookRepositoryImpl(BookRepository):
         )
         await self.db_session.commit()
 
-    async def delete_book(self, book_id: int) -> None:
+    async def delete_book(self, book_id: int) -> str | None:
+        """Delete a book and return its file path for cleanup."""
+        result = await self.db_session.execute(
+            select(BookDB).where(BookDB.id == book_id)
+        )
+        book_db = result.scalar_one_or_none()
+        if book_db is None:
+            return None
+
+        file_path = book_db.file_path
+
         await self.db_session.execute(
             delete(BookDB).where(BookDB.id == book_id)
         )
         await self.db_session.commit()
+        return file_path
 
 
 class ChapterRepositoryImpl(ChapterRepository):

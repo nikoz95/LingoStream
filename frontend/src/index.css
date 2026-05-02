@@ -1,0 +1,9 @@
+@import "tailwindcss";
+
+@theme {
+  --color-sepia-bg: #f8f0e3;
+  --color-sepia-text: #5b4636;
+  --color-deepnight-bg: #1a1a2e;
+  --color-deepnight-text: #e0e0e0;
+  --color-deepnight-accent: #16213e;
+}

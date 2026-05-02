@@ -19,6 +19,7 @@ class RegisterUserRequest:
 class RegisterUserResponse:
     id: int
     email: str
+    created_at: Optional[object] = None
 
 
 class RegisterUser:
@@ -43,5 +44,6 @@ class RegisterUser:
         
         return RegisterUserResponse(
             id=saved_user.id,
-            email=saved_user.email
+            email=saved_user.email,
+            created_at=saved_user.created_at,
         )

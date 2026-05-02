@@ -29,6 +29,9 @@ services:
       - DB_URL=postgresql+asyncpg://user:password@db:5432/lingostream
       - JWT_SECRET=your-secret-key-here
       - REDIS_URL=redis://redis:6379/0
+      - LLM_MODEL=qwen2.5-coder:14b
+      - LLM_BASE_URL=http://host.docker.internal:11434
+      - LLM_PROVIDER=local
     depends_on:
       db:
         condition: service_healthy
@@ -36,6 +39,18 @@ services:
         condition: service_started
     volumes:
       - .:/app
+
+  frontend:
+    build: ../frontend
+    ports:
+      - "5173:5173"
+    environment:
+      - VITE_API_URL=http://localhost:8000
+    depends_on:
+      - backend
+    volumes:
+      - ../frontend:/app
+      - /app/node_modules
 
 volumes:
   postgres_data:
