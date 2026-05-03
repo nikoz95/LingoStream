@@ -3,6 +3,7 @@ import { useAuth } from './lib/auth';
 import LoginPage from './pages/LoginPage';
 import LibraryPage from './pages/LibraryPage';
 import ReaderPage from './pages/ReaderPage';
+import VocabularyPage from './pages/VocabularyPage';
 import LoadingSpinner from './components/LoadingSpinner';
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
@@ -37,6 +38,14 @@ export default function App() {
         element={
           <ProtectedRoute>
             <ReaderPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/vocabulary"
+        element={
+          <ProtectedRoute>
+            <VocabularyPage />
           </ProtectedRoute>
         }
       />

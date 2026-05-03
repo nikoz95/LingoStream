@@ -201,27 +201,18 @@ export function getBookFileUrl(bookId: number): string {
   return `${API_BASE}/books/${bookId}/file?token=${encodeURIComponent(token)}`;
 }
 
-export function translateStreamUrl(bookId: number, selectedText: string): string {
-  const token = getAccessToken();
-  if (!token) return '';
-  const base = `${API_BASE}/books/${bookId}/translate-text-stream`;
-  return `${base}?token=${encodeURIComponent(token)}&selected_text=${encodeURIComponent(selectedText)}`;
-}
-
 // ── Translation API ──
 
 export interface TranslateTextRequest {
-  selected_text: string;
-  left_context: string;
-  right_context: string;
-  book_title: string;
-  source_language: string;
+  text: string;
+  language?: string | null;
   provider?: string | null;
 }
 
 export interface TranslateTextResponse {
-  original: string;
-  translation: string;
+  source_text: string;
+  translated_text: string;
+  provider: string;
 }
 
 export async function translateSelectedText(
@@ -232,4 +223,101 @@ export async function translateSelectedText(
     method: 'POST',
     body: JSON.stringify(req),
   });
+}
+
+// ── Word Translation API ──
+
+export interface TranslateWordRequest {
+  word: string;
+  left_context?: string;
+  right_context?: string;
+  book_title?: string;
+  source_language?: string;
+  provider?: string | null;
+}
+
+export interface TranslateWordResponse {
+  word: string;
+  translation: string;
+  phonetic: string;
+  definition: string;
+  sentence_context: string;
+  sentence_context_translated: string;
+  provider: string;
+}
+
+export async function translateWord(
+  bookId: number,
+  req: TranslateWordRequest,
+): Promise<TranslateWordResponse> {
+  return request<TranslateWordResponse>(`/books/${bookId}/translate-word`, {
+    method: 'POST',
+    body: JSON.stringify(req),
+  });
+}
+
+// ── Vocabulary API ──
+
+export interface VocabularyWord {
+  id: number;
+  word: string;
+  phonetic: string | null;
+  definition: string | null;
+  sentence_context: string | null;
+  sentence_context_translated: string | null;
+  translation: string | null;
+  book_id: number | null;
+  created_at: string | null;
+}
+
+export interface VocabularyListResponse {
+  words: VocabularyWord[];
+  total: number;
+}
+
+export interface CreateVocabularyWordRequest {
+  book_id?: number | null;
+  word: string;
+  phonetic?: string | null;
+  definition?: string | null;
+  sentence_context?: string | null;
+  sentence_context_translated?: string | null;
+  translation?: string | null;
+}
+
+export async function listVocabularyWords(bookId?: number): Promise<VocabularyListResponse> {
+  const query = bookId !== undefined ? `?book_id=${bookId}` : '';
+  return request<VocabularyListResponse>(`/vocabulary/words${query}`);
+}
+
+export async function saveVocabularyWord(req: CreateVocabularyWordRequest): Promise<VocabularyWord> {
+  return request<VocabularyWord>('/vocabulary/words', {
+    method: 'POST',
+    body: JSON.stringify(req),
+  });
+}
+
+export async function updateVocabularyWord(
+  wordId: number,
+  req: Partial<CreateVocabularyWordRequest>,
+): Promise<VocabularyWord> {
+  return request<VocabularyWord>(`/vocabulary/words/${wordId}`, {
+    method: 'PUT',
+    body: JSON.stringify(req),
+  });
+}
+
+export interface CheckVocabularyResponse {
+  exists: boolean;
+  word: VocabularyWord | null;
+}
+
+export async function checkVocabularyWord(word: string): Promise<CheckVocabularyResponse> {
+  return request<CheckVocabularyResponse>(
+    `/vocabulary/words/check?word=${encodeURIComponent(word)}`,
+  );
+}
+
+export async function deleteVocabularyWord(wordId: number): Promise<void> {
+  return request(`/vocabulary/words/${wordId}`, { method: 'DELETE' });
 }

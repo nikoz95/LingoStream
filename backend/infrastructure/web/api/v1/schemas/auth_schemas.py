@@ -32,6 +32,3 @@ class RefreshTokenRequest(BaseModel):
     refresh_token: str
 
 
-class TokenData(BaseModel):
-    user_id: Optional[int] = None
-    token_type: Optional[str] = None

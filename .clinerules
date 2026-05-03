@@ -8,7 +8,7 @@ docker-compose -f backend/docker-compose.yml down
 docker-compose -f backend/docker-compose.yml up --build -d
 ```
 
-**DO NOT** use the `-v` flag with `docker-compose down` (i.e., avoid `docker-compose down -v`), as that would delete the database volume and require re-running `init_db.py`.
+**DO NOT** use the `-v` flag with `docker-compose down` (i.e., avoid `docker-compose down -v`), as that would delete the database volume (tables are auto-created at app startup).
 
 ---
 
@@ -25,7 +25,6 @@ docker-compose -f backend/docker-compose.yml up --build -d
 ### Entry Points
 ```
 main.py              → FastAPI app, uvicorn entry point (reload=True)
-init_db.py           → Standalone script, creates tables
 ```
 
 ### Config Layer
@@ -50,12 +49,18 @@ domain/repositories/
 #### Database (Postgres)
 ```
 infrastructure/database/postgres/
-  models.py           → SQLAlchemy ORM: User, Book, Chapter, Paragraph, TranslationRecord
+  models.py           → SQLAlchemy ORM: User, Book, Chapter, Paragraph, TranslationRecord, VocabularyWord
+                        VocabularyWord: id, user_id (FK), word, phonetic, definition, sentence_context,
+                        sentence_context_translated, source_language, book_id (nullable FK), created_at, updated_at
   session.py          → engine, Base (DeclarativeBase), get_session() async generator
   repositories.py     → Consolidated impls: BookRepositoryImpl, ChapterRepositoryImpl,
-                         ParagraphRepositoryImpl, UserRepositoryImpl
+                         ParagraphRepositoryImpl, UserRepositoryImpl, BaseRepositoryImpl,
+                         VocabularyRepositoryImpl
+                          VocabularyRepositoryImpl: add_word, get_words_by_user, get_word_by_id, delete_word,
+                                                     find_by_word, update_word
                          All ORM-to-entity helpers: _book_from_orm, _chapter_from_orm,
-                         _paragraph_from_orm, _user_from_orm
+                         _paragraph_from_orm, _user_from_orm, _vocab_word_from_orm
+                         BaseRepositoryImpl provides shared __init__ accepting AsyncSession
   epub_parser.py      → EPUBParser: lazy chapter-by-chapter, extract_metadata(), extract_toc(), parse_chapter()
   pdf_parser.py       → PDFParser: same interface, PyMuPDF (fitz), lazy per-page, image embedding as base64 <img>
 ```
@@ -63,17 +68,17 @@ infrastructure/database/postgres/
 #### AI / LLM
 ```
 infrastructure/ai/
-  translation_service.py → TranslationService class
+  translation_service.py → Module-level functions (no class)
     - Context-aware literary translation to Georgian
     - Default provider: OpenAI-compatible API (LLM_PROVIDER=openai, LLM_BASE_URL, LLM_API_KEY, LLM_MODEL)
     - Runtime provider override: provider="gemini" | "deepseek"
     - Also supports LLM_PROVIDER=local (Ollama native /api/chat endpoint)
-    - Clean public API: translate(passage, *, left_context, right_context, book_title, source_language, provider)
+    - Clean public API: translate(passage, *, left_context, right_context, book_title, source_language, provider) — module-level function
     - Provider resolution: _resolve_provider(provider) → (api_key, model, base_url, effective)
     - Two backends: _call_openai() (uses openai SDK), _call_local() (httpx.AsyncClient to Ollama)
     - Module-level _clean_translation() helper strips quotes/code fences from LLM output
     - TranslationError exception class for all translation failures
-    - close() method for app shutdown cleanup
+    - No class, no close() needed — no cleanup required
 ```
 
 #### Security
@@ -91,42 +96,68 @@ infrastructure/security/
 ```
 infrastructure/web/api/v1/
   app.py               → create_app() factory with @asynccontextmanager lifespan
-                         Exposes translation_service singleton (module-level var)
                          Includes CORS middleware + route prefixes
-                         Tables auto-created at startup via lifespan
+                         Tables auto-created + migrations (ALTER TABLE ADD COLUMN IF NOT EXISTS) at startup
   dependencies.py      → authenticate_request() → AuthenticatedUser dataclass (user + token + payload)
                          get_current_user() → User (for backward compatibility)
                          get_blacklist_service() → TokenBlacklistService (yield + cleanup)
+                         get_translation_service() → TranslationService singleton (yield + cleanup)
   routes/
     auth_router.py      → POST /api/v1/auth/register, /login, /refresh, /logout, GET /api/v1/auth/me
                           Helper: _build_token_response(user) → TokenResponse
     book_router.py      → POST /api/v1/books/register, GET /api/v1/books, GET /api/v1/books/{id},
-                          GET /api/v1/books/{id}/chapters, GET /api/v1/books/{id}/chapters/{cid},
-                          GET /api/v1/books/{id}/chapters/{cid}/paragraphs,
-                          GET /api/v1/books/{id}/file, DELETE /api/v1/books/{id}
-                          Helpers: _get_parser(), _chapter_to_response(), _paragraph_to_response()
-                          Auto-parses chapters on first access (lazy parsing)
+                           GET /api/v1/books/{id}/chapters, GET /api/v1/books/{id}/chapters/{cid},
+                           GET /api/v1/books/{id}/chapters/{cid}/paragraphs,
+                           GET /api/v1/books/{id}/file, DELETE /api/v1/books/{id}
+                           Helpers: _get_parser(), _chapter_to_response(), _paragraph_to_response(),
+                                    _get_owned_book(), _ensure_chapter_parsed()
+                           Auto-parses chapters on first access (lazy parsing)
     translation_router.py → POST /api/v1/books/{id}/chapters/{cid}/translate,
-                            POST /api/v1/books/{id}/translate-text
-                            Uses app.translation_service singleton
+                             POST /api/v1/books/{id}/translate-text
+                         Uses get_translation_service() via Depends() from dependencies.py
+    vocabulary_router.py → POST /api/v1/vocabulary, GET /api/v1/vocabulary, DELETE /api/v1/vocabulary/{id},
+                            PUT /api/v1/vocabulary/{id}, GET /api/v1/vocabulary/words/check
+                            PUT: update word fields (word, phonetic, definition, sentence_context, sentence_context_translated, translation)
+                            GET /words/check: ?word=TEXT → checks if word exists for current user
   schemas/
     auth_schemas.py     → RegisterRequest, LoginRequest, RefreshTokenRequest, TokenResponse, UserResponse
-    book_schemas.py     → RegisterBookResponse, BookListItem, BookDetailResponse, ChapterResponse,
-                          ChapterParagraphsResponse, ParagraphResponse, TranslatePassageRequest,
-                          TranslatePassageResponse, TranslateTextRequest, TranslateTextResponse
+    book_schemas.py     → BookSchema (base), BookListItem (inherits), RegisterBookResponse (inherits),
+                          BookDetailResponse (inherits + chapters), ChapterResponse, ParagraphResponse,
+                          ChapterParagraphsResponse, TranslatePassageRequest/Response,
+                          TranslateTextRequest/Response, VocabularyWordSchema
+                          TranslateTextResponse includes: translation, phonetic, definition, sentence_context
+                          UpdateVocabularyWordRequest: editable word fields (all optional)
+                          VocabularyCheckResponse: { exists: bool, word: VocabularyWordSchema | null }
+                          Inheritance used to share repeated book fields
 ```
 
 ### Key Conventions
 - **Imports**: absolute from project root (`from config.settings import settings`)
 - **Naming**: snake_case, `_impl` suffix for repository implementations (used as classes), `_` prefix for private helpers
-- **Repositories**: consolidated into single `repositories.py` (not split into `book_repository_impl.py` + `user_repository_impl.py`)
+- **Repositories**: consolidated into single `repositories.py`; `BaseRepositoryImpl` base class eliminates repeated `__init__`
 - **Error handling**: `HTTPException` in routes, `logger.error()` + custom exceptions in services
 - **Response format**: Pydantic models, auto-serialized by FastAPI
 - **Session lifecycle**: `get_session()` async generator → `Depends()` in route handlers
 - **Response builders**: extracted as module-level functions (`_book_from_orm`, `_chapter_to_response`, etc.)
 - **Lazy parsing**: chapters parsed on first access, first chapter parsed immediately on upload
 - **App lifecycle**: `@asynccontextmanager` lifespan hook for startup/shutdown cleanup
-- **Translation singleton**: `app.translation_service` module-level var imported by translation_router
+- **Translation singleton**: `get_translation_service()` via `Depends()` in `dependencies.py`
+- **Smart selection UX**: `useTextSelection` hook auto-selects word on click (mousedown+same-position mouseup), enables drag for multi-word, calculates BoundingRect for floating translate icon; filters out clicks outside PDF text layer (fixes translate icon appearing on empty space); returns `isWordClick`, `leftContext`, `rightContext` for context-aware word translation; JS-based per-word hover via mouseenter/mouseleave event delegation (applies `.word-hover-highlight` class programmatically)
+- **Word detection**: backend `translate-text` endpoint auto-detects single-word vs. passage, returns `phonetic`, `definition`, `sentence_context` for dictionary lookup; full translation for passages
+- **Vocabulary saves**: `TranslationPanel` has "Save to Vocabulary" button; `VocabularyPage` lists all saved words with phonetic/definition/context
+- **Vocabulary auto-check**: `useTranslation` auto-checks if word already exists on lookup; if found, shows "Already in vocabulary" state in TranslationPanel with edit button
+- **Vocabulary inline edit**: `TranslationPanel` shows inline edit form for existing words directly in the sidebar; `VocabularyPage` has edit mode with form fields for all word data
+- **Vocabulary word update API**: `PUT /api/v1/vocabulary/{id}` updates any subset of word fields; `GET /api/v1/vocabulary/words/check?word=TEXT` checks existence
+- **Vocabulary word update frontend**: `updateVocabularyWord()` in api.ts calls PUT endpoint; `checkVocabularyWord()` calls GET /words/check
+- **Shared validation**: `_get_owned_book()` helper verifies book ownership in book_router.py
+- **Lazy parsing helper**: `_ensure_chapter_parsed()` extracts repeated chapter-parsing logic
+- **Schema inheritance**: `BookSchema` base class used to avoid field duplication in schemas
+- **Word phonetic format**: LLM returns 3-part phonetic string: `"word / pronunciation / Georgian script"` for single-word lookups (updated to use `/` separators with proper spacing)
+- **sentence_context_translated**: `translate-word` endpoint returns a `sentence_context_translated` field — the Georgian translation of the sentence context example. Stored in `VocabularyWord.sentence_context_translated` column. Displayed in `TranslationPanel` (amber-tinted block below original context) and `VocabularyPage` (amber-tinted text below italic context).
+- **Auto-clear translation**: ReaderPage auto-closes translation panel and resets "Saved to Vocabulary" state when new text is selected
+- **Word hover highlight**: `.word-hover-highlight` CSS class on index.css applied to PDF text layer spans on mouseenter via useTextSelection
+- **Translate icon click fix**: useTextSelection ignores clicks outside `.react-pdf__Page__textContent` (prevents translate icon on empty PDF areas)
+- **DB migrations**: `app.py` lifespan runs `ALTER TABLE ... ADD COLUMN IF NOT EXISTS` for schema additions to existing tables (since `create_all` only creates new tables)
 
 ### Auth Flow
 1. `POST /api/v1/auth/register` → hash password → save user → return JWT (access + refresh)
@@ -157,63 +188,101 @@ infrastructure/web/api/v1/
 
 ---
 
-## Frontend Architecture (12 TypeScript/React files)
+## Frontend Architecture (17 TypeScript/React files)
 
 ### Tech Stack
-- **React 19**, **TypeScript**, **Vite**, **Tailwind CSS**
+- **React 19**, **TypeScript**, **Vite**, **Tailwind CSS v4** (with `@import 'tailwindcss'` and `@theme` directive)
 - **React Router v7** for client-side routing
 - **react-pdf** (pdfjs-dist) for PDF rendering with text layer
 - **localStorage** JWT storage (token, refresh-token) via auth context
 - **Unified UI theme**: purple/dark gradient background (from-gray-900 via-purple-900 to-gray-900) applied via `body` in `index.css`
 - **Reader themes**: sepia/night toggles (default = system `prefers-color-scheme: dark`)
 - **Glassmorphism**: `.glass` utility class with backdrop-blur for cards/headers
+- **IntersectionObserver** for scroll-based page tracking & reading progress
+- **PDF.js search API** (`PDFFindController`) for in-document text search
+- **Thumbnail sidebar** using miniaturized react-pdf `Page` components
 
 ### File Map
 ```
 frontend/src/
   main.tsx             → ReactDOM entry
-  App.tsx              → Routes: /login, /library, /reader/:bookId
+  App.tsx              → Routes: /login, /library, /reader/:bookId, /vocabulary
   index.css            → Tailwind import + @theme vars + glass utility + sepia/night theme classes
-                         + body bg gradient (purple/dark), scrollbar styling, PDF viewer overrides
+                         + body bg gradient (purple/dark), scrollbar styling, PDF viewer overrides,
+                         page transition animations, search results styling
   vite-env.d.ts        → Vite type declarations
 
   lib/
     api.ts             → Axios instance + API functions (login, register, getBooks, uploadBook,
-                          getBookFileUrl, translateText). Axios interceptor handles token injection + 401 refresh.
+                          getBookFileUrl, translateText, saveVocabularyWord, getVocabularyWords,
+                          deleteVocabularyWord). Axios interceptor handles token injection + 401 refresh.
     auth.tsx           → AuthContext: login(), register(), logout(), getAccessToken()
                           localStorage: lingostream_token, lingostream_refresh
 
   components/
     LoadingSpinner.tsx  → Reusable spinner with message, light variant, inline mode
-    ReaderHeader.tsx    → Top bar with title, page count, theme toggle, sidebar toggle, back/logout
+    ReaderHeader.tsx    → Top bar with: title, page nav, theme toggle, sidebar toggle, back/logout,
+                           zoom slider (± buttons), view mode selector (scroll/single/spread),
+                           search toggle button (Ctrl+F), progress bar, jump-to-page input
     TranslationPanel.tsx → Sidebar panel: selected text, translate button, translation output,
-                           provider selector (openai/gemini/deepseek), error/streaming states
+                           provider selector (openai/gemini/deepseek), error/streaming states,
+                           phonetic + definition display for words, "Save to Vocabulary" button
+    ThumbnailSidebar.tsx → Collapsible left sidebar with mini PDF page thumbnails,
+                           current page highlight, click-to-navigate, scroll tracking
+    SearchPanel.tsx      → Overlay panel: search input with debounce (400ms),
+                           match counter + prev/next navigation, clickable results list,
+                           keyboard shortcuts (Enter, Shift+Enter, Esc)
 
   hooks/
-    useContainerWidth.ts → ResizeObserver on PDF container ref
-    usePdfLoader.ts      → Fetches book metadata + PDF blob from API, returns book/loading/error
-    useTextSelection.ts  → Listens for text selection events, returns selectedText + clearSelection
-    useTranslation.ts    → Manages translate(), streaming text, translation result, provider state
+    useContainerWidth.ts  → ResizeObserver on PDF container ref
+    usePdfLoader.ts       → Fetches book metadata + PDF blob from API, returns book/loading/error
+    useTextSelection.ts   → Auto-selects word on click (mousedown+same-position mouseup),
+                           enables drag for multi-word, calculates BoundingRect for floating translate icon,
+                           returns selectedText, selectionRect, clearSelection
+    useTranslation.ts     → Manages translate(), streaming text, translation result, provider state,
+                           handles phonetic, definition, sentence_context fields
+    useReadingProgress.ts → Scroll-based progress tracking via IntersectionObserver,
+                            saves/restores position to localStorage
+    usePdfSearch.ts       → Wraps PDF.js PDFFindController for in-document search,
+                            returns matches with page numbers + context text,
+                            navigation helpers (next/prev match)
 
   pages/
     LoginPage.tsx        → Purple/dark glass card, background blobs, LoadingSpinner
-    LibraryPage.tsx      → Book list with upload button, file input (.pdf,.epub), scrollable grid
+    LibraryPage.tsx      → Book list with upload button, file input (.pdf,.epub), scrollable grid,
+                           "Vocabulary" button in header
+    VocabularyPage.tsx   → Saved words list with phonetic, definition, sentence context,
+                           delete button per word, back to library navigation
     ReaderPage.tsx       → PDF viewer + translation sidebar, delegates to hooks + components,
-                           dark mode auto-detection via `window.matchMedia('(prefers-color-scheme: dark)')`
+                           dark mode auto-detection via `window.matchMedia`,
+                           keyboard shortcuts (← →, PgUp PgDn, Home, End, Ctrl+F),
+                           Ctrl+Wheel zoom, IntersectionObserver page tracking,
+                           floating page nav bottom-right, scroll/single/spread view modes
 ```
 
 ### Key Patterns
-- **Custom hooks** for all stateful logic (API calls, selection, translation, resize observer)
-- **Separate components** for UI blocks (LoadingSpinner, ReaderHeader, TranslationPanel)
+- **Custom hooks** for all stateful logic (API calls, selection, translation, resize observer, progress, search)
+- **Separate components** for UI blocks (LoadingSpinner, ReaderHeader, TranslationPanel, ThumbnailSidebar, SearchPanel)
 - **AuthContext** via React context for global auth state + token management
 - **Axios interceptors** in api.ts for automatic token injection + 401 refresh
 - **Callback memoization** with `useCallback` for event handlers passed as props
 - **CSS themes** via `.theme-sepia` / `.theme-night` class toggles
 - **Dark mode auto-detection**: ReaderPage uses `window.matchMedia('(prefers-color-scheme: dark)')` to set default reader theme
+- **IntersectionObserver** for page tracking (thresholds: 0.1, 0.3, 0.6) with `isScrollingRef` guard
+- **Reading progress** saved to `localStorage` keyed by `reading_progress_{bookId}` with page number + percentage
+- **Search** uses custom `usePdfSearch` hook with per-page text extraction, match counting, page navigation, and `setCurrentMatchByPage` for click-to-navigate
+- **Search highlights** applied via `.search-highlight` CSS class on PDF text layer spans (purple background + border)
+- **View modes**: scroll (infinite vertical), single (previous/current/next pages), spread (two-page pairs)
+- **Zoom**: Ctrl+Wheel listener, slider in header, clamped 0.5x–3.0x
+- **Keyboard shortcuts**: ←/PgUp (prev), →/PgDn (next), Home (page 1), End (last page), Ctrl+F (search), Esc (close search)
 - **Loading states** use reusable `<LoadingSpinner>` component with `light`/`inline` variants
 - **Error states** handled inline per component/page
 - **Absolutely no inline spinner HTML** — every page uses `<LoadingSpinner>`
 - **Consistent color palette**: all pages share purple/dark gradient (`from-gray-900 via-purple-900 to-gray-900`) for a unified look
+- **`ViewMode` type** exported from ReaderHeader: `'scroll' | 'single' | 'spread'`
+- **`SearchResult` type** exported from usePdfSearch: `{ matches: Match[], currentMatchIndex: number, totalMatches: number }`
+- **`SearchMatch` type** exported from usePdfSearch: `{ pageIndex, pageNumber, text, matchIndex }`
+- **`setCurrentMatchByPage`** exported from usePdfSearch: updates `currentMatchIndex` to first match on given page
 
 ---
 

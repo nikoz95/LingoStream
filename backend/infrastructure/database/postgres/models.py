@@ -78,3 +78,19 @@ class TranslationRecord(Base):
     translated_text = Column(Text, nullable=False)
     provider = Column(String(50), default="openai")
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+
+
+class VocabularyWord(Base):
+    """Saved vocabulary words for a user."""
+    __tablename__ = "vocabulary_words"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    book_id = Column(Integer, ForeignKey("books.id"), nullable=True)
+    word = Column(String(500), nullable=False)
+    phonetic = Column(String(500), nullable=True)
+    definition = Column(Text, nullable=True)
+    sentence_context = Column(Text, nullable=True)
+    sentence_context_translated = Column(Text, nullable=True)
+    translation = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))

@@ -1,5 +1,7 @@
+"""FastAPI dependencies — JWT auth, token blacklist, and shared services."""
 from dataclasses import dataclass
-from typing import Optional
+from typing import AsyncIterator, Optional
+
 from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -16,14 +18,14 @@ security_scheme = HTTPBearer(auto_error=False)
 
 @dataclass
 class AuthenticatedUser:
-    """Holds the authenticated user along with the raw token and its payload."""
+    """Authenticated user with raw token and its payload."""
     user: User
     token: str
     payload: dict
 
 
 async def get_blacklist_service() -> TokenBlacklistService:
-    """Dependency that provides a TokenBlacklistService instance."""
+    """Yield a TokenBlacklistService instance, then close it on completion."""
     service = TokenBlacklistService()
     try:
         yield service
@@ -48,7 +50,6 @@ async def authenticate_request(
     if credentials is not None:
         token = credentials.credentials
     elif request is not None:
-        # Fallback: extract from ?token= query parameter
         token = request.query_params.get("token")
 
     if token is None:
@@ -57,6 +58,7 @@ async def authenticate_request(
             detail="Not authenticated",
             headers={"WWW-Authenticate": "Bearer"},
         )
+
     payload = jwt.decode_token(token)
     if payload is None:
         raise HTTPException(
@@ -64,7 +66,6 @@ async def authenticate_request(
             detail="Invalid or expired token",
         )
 
-    # Check if the token has been blacklisted (logged out)
     jti = payload.get("jti")
     if jti is not None:
         is_blacklisted = await blacklist.is_blacklisted(jti)
@@ -98,5 +99,3 @@ async def get_current_user(
 ) -> User:
     """Dependency that returns just the User (for backward compatibility)."""
     return auth.user
-
-

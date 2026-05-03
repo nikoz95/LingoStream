@@ -1,153 +1,164 @@
-"""Translation routes: translate passage, translate arbitrary text."""
+"""Routes for translating text passages via AI providers."""
 import logging
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from infrastructure.ai.translation_service import TranslationService
+from config.settings import settings
+from infrastructure.database.postgres.session import get_session
 from infrastructure.database.postgres.repositories import (
     BookRepositoryImpl,
     ParagraphRepositoryImpl,
 )
-from infrastructure.database.postgres.session import get_session
-from infrastructure.web.api.v1.dependencies import get_current_user
+from infrastructure.web.api.v1.dependencies import authenticate_request, AuthenticatedUser
 from infrastructure.web.api.v1.schemas.book_schemas import (
     TranslatePassageRequest,
     TranslatePassageResponse,
     TranslateTextRequest,
     TranslateTextResponse,
+    TranslateWordRequest,
+    TranslateWordResponse,
 )
-from domain.entities.user import User
+from infrastructure.ai import translation_service as ts
 
 logger = logging.getLogger(__name__)
+
 router = APIRouter()
 
 
-def get_translation_service() -> TranslationService:
-    """Return a singleton TranslationService instance."""
-    from infrastructure.web.api.v1.app import translation_service
-    return translation_service
+async def _verify_book_ownership(
+    book_id: int, auth_user_id: int, db: AsyncSession
+) -> None:
+    """Verify the book exists and belongs to the authenticated user."""
+    repo = BookRepositoryImpl(db)
+    book = await repo.get_book_by_id(book_id)
+    if book is None or book.user_id != auth_user_id:
+        raise HTTPException(status_code=404, detail="Book not found")
+    return book
 
 
 @router.post(
     "/{book_id}/chapters/{chapter_id}/translate",
     response_model=TranslatePassageResponse,
+    summary="Translate a passage from a book chapter",
 )
 async def translate_passage(
     book_id: int,
     chapter_id: int,
-    request: TranslatePassageRequest,
+    body: TranslatePassageRequest,
+    auth: AuthenticatedUser = Depends(authenticate_request),
     db: AsyncSession = Depends(get_session),
-    current_user: User = Depends(get_current_user),
 ):
-    """Translate a passage (selected paragraph indices) within a chapter."""
-    para_repo = ParagraphRepositoryImpl(db)
-    all_paragraphs = await para_repo.get_paragraphs_by_chapter(chapter_id)
-    index_map = {p.index: p.content for p in all_paragraphs}
-    selected_indices = sorted(request.selected_indices)
+    """Translate a selected passage from a chapter using the chosen AI provider."""
+    book = await _verify_book_ownership(book_id, auth.user.id, db)
+    paragraph_repo = ParagraphRepositoryImpl(db)
 
-    if not selected_indices:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="No paragraph indices provided",
-        )
+    all_paragraphs = await paragraph_repo.get_paragraphs_by_chapter(chapter_id)
+    if not all_paragraphs:
+        raise HTTPException(status_code=404, detail="No paragraphs found in chapter")
 
-    # Build passage from selected indices
-    passage_parts = []
-    for idx in selected_indices:
-        content = index_map.get(idx)
-        if content is None:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Paragraph index {idx} not found in chapter {chapter_id}",
-            )
-        passage_parts.append(content)
-    passage = "\n\n".join(passage_parts)
+    context_window = body.context_window or 2
+    indices = body.paragraph_indices
 
-    # Build left/right context
-    min_idx = min(selected_indices)
-    max_idx = max(selected_indices)
+    passage_texts = [
+        p.content for p in all_paragraphs if p.index in indices
+    ]
+    passage = " ".join(passage_texts) if passage_texts else ""
 
-    left_parts = []
-    for n in range(1, request.left_context_count + 1):
-        ctx = index_map.get(min_idx - n)
-        if ctx:
-            left_parts.append(ctx)
-    left_context = "\n\n".join(reversed(left_parts))
+    if not passage:
+        raise HTTPException(status_code=400, detail="No valid paragraphs for given indices")
 
-    right_parts = []
-    for n in range(1, request.right_context_count + 1):
-        ctx = index_map.get(max_idx + n)
-        if ctx:
-            right_parts.append(ctx)
-    right_context = "\n\n".join(right_parts)
+    min_idx, max_idx = min(indices), max(indices)
+    left = "\n".join(p.content for p in all_paragraphs if min_idx - context_window <= p.index < min_idx)
+    right = "\n".join(p.content for p in all_paragraphs if max_idx < p.index <= max_idx + context_window)
 
-    # Fetch book title for context
-    book_repo = BookRepositoryImpl(db)
-    book = await book_repo.get_book_by_id(book_id)
-    book_title = book.title if book else ""
-
-    # Translate
-    translation_service = get_translation_service()
     try:
-        translation = await translation_service.translate(
-            passage,
-            left_context=left_context,
-            right_context=right_context,
-            book_title=book_title,
-            source_language=request.source_language,
-            provider=request.provider,
+        translation = await ts.translate(
+            passage=passage,
+            left_context=left,
+            right_context=right,
+            book_title=book.title,
+            source_language=book.language,
+            provider=body.provider,
         )
-    except Exception as exc:
-        logger.error("Translation failed for book=%d chapter=%d: %s", book_id, chapter_id, exc)
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail=f"Translation failed: {exc}",
-        )
+    except ts.TranslationError:
+        logger.exception("Translation failed for book=%d chapter=%d", book_id, chapter_id)
+        raise HTTPException(status_code=502, detail="Translation failed")
 
     return TranslatePassageResponse(
-        original=passage,
+        passage=passage,
         translation=translation,
-        left_context=left_context,
-        right_context=right_context,
+        provider=body.provider or settings.LLM_PROVIDER,
     )
 
 
 @router.post(
     "/{book_id}/translate-text",
     response_model=TranslateTextResponse,
+    summary="Translate arbitrary text selection from a book",
 )
 async def translate_text(
     book_id: int,
-    request: TranslateTextRequest,
+    body: TranslateTextRequest,
+    auth: AuthenticatedUser = Depends(authenticate_request),
     db: AsyncSession = Depends(get_session),
-    current_user: User = Depends(get_current_user),
 ):
-    """Translate arbitrary text selection with surrounding context."""
-    if not request.selected_text:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="No text provided",
-        )
+    """Translate arbitrary selected text from a book (no chapter DB lookup needed)."""
+    book = await _verify_book_ownership(book_id, auth.user.id, db)
 
-    translation_service = get_translation_service()
     try:
-        translation = await translation_service.translate(
-            request.selected_text,
-            left_context=request.left_context,
-            right_context=request.right_context,
-            book_title=request.book_title,
-            source_language=request.source_language,
-            provider=request.provider,
+        translation = await ts.translate(
+            passage=body.text,
+            left_context="",
+            right_context="",
+            book_title=book.title,
+            source_language=body.language or book.language,
+            provider=body.provider,
         )
-    except Exception as exc:
-        logger.error("Text translation failed for book=%d: %s", book_id, exc)
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail=f"Translation failed: {exc}",
-        )
+    except ts.TranslationError:
+        logger.exception("Translation failed for book=%d (free text)", book_id)
+        raise HTTPException(status_code=502, detail="Translation failed")
 
     return TranslateTextResponse(
-        original=request.selected_text,
-        translation=translation,
+        source_text=body.text,
+        translated_text=translation,
+        provider=body.provider or settings.LLM_PROVIDER,
+    )
+
+
+@router.post(
+    "/{book_id}/translate-word",
+    response_model=TranslateWordResponse,
+    summary="Translate a single word with phonetic, definition, and sentence context",
+)
+async def translate_word_endpoint(
+    book_id: int,
+    body: TranslateWordRequest,
+    auth: AuthenticatedUser = Depends(authenticate_request),
+    db: AsyncSession = Depends(get_session),
+):
+    """Translate a single word to Georgian with phonetic, definition, sentence context."""
+    book = await _verify_book_ownership(book_id, auth.user.id, db)
+
+    try:
+        result = await ts.translate_word(
+            word=body.word,
+            left_context=body.left_context,
+            right_context=body.right_context,
+            book_title=body.book_title or book.title,
+            source_language=body.source_language or book.language,
+            provider=body.provider,
+        )
+    except ts.TranslationError:
+        logger.exception("Word translation failed for book=%d word=%s", book_id, body.word)
+        raise HTTPException(status_code=502, detail="Translation failed")
+
+    return TranslateWordResponse(
+        word=body.word,
+        translation=result.get("translation", ""),
+        phonetic=result.get("phonetic", ""),
+        definition=result.get("definition", ""),
+        sentence_context=result.get("sentence_context", ""),
+        sentence_context_translated=result.get("sentence_context_translated", ""),
+        provider=body.provider or settings.LLM_PROVIDER,
     )

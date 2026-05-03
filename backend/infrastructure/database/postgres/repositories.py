@@ -1,4 +1,8 @@
-"""SQLAlchemy async repository implementations for all domain entities."""
+"""SQLAlchemy async repository implementations for all domain entities.
+
+Each repository inherits from ``BaseRepositoryImpl`` (which holds the DB session)
+and implements the corresponding domain repository ABC.
+"""
 from typing import Optional, List
 
 from sqlalchemy import select, update, delete
@@ -14,8 +18,7 @@ from domain.repositories.book_repository import (
 from domain.repositories.user_repository import UserRepository
 from infrastructure.database.postgres import models as orm
 
-
-# ── ORM mapping helpers ──────────────────────────────────────────────────────
+# ── ORM → Entity helpers ──────────────────────────────────────────────────
 
 
 def _book_from_orm(b: orm.Book) -> Book:
@@ -68,14 +71,20 @@ def _user_from_orm(u: orm.User) -> User:
     )
 
 
-# ── Book Repository ──────────────────────────────────────────────────────────
+# ── Base ──────────────────────────────────────────────────────────────────
 
 
-class BookRepositoryImpl(BookRepository):
-    """CRUD for Book entities."""
+class BaseRepositoryImpl:
+    """Holds the async DB session for all repository implementations."""
 
     def __init__(self, db: AsyncSession) -> None:
         self.db = db
+
+
+# ── Book ──────────────────────────────────────────────────────────────────
+
+
+class BookRepositoryImpl(BaseRepositoryImpl, BookRepository):
 
     async def add_book(self, book: Book) -> Book:
         book_orm = orm.Book(
@@ -112,26 +121,39 @@ class BookRepositoryImpl(BookRepository):
         await self.db.commit()
 
     async def delete_book(self, book_id: int) -> Optional[str]:
-        result = await self.db.execute(
-            select(orm.Book).where(orm.Book.id == book_id)
-        )
+        result = await self.db.execute(select(orm.Book).where(orm.Book.id == book_id))
         book_orm = result.scalar_one_or_none()
         if book_orm is None:
             return None
         file_path = book_orm.file_path
+
+        # Cascade delete: children first, then nullify vocab references, then delete book
+        # 1. Delete translation records for paragraphs in this book
+        await self.db.execute(
+            delete(orm.TranslationRecord).where(
+                orm.TranslationRecord.paragraph_id.in_(
+                    select(orm.Paragraph.id).where(orm.Paragraph.book_id == book_id)
+                )
+            )
+        )
+        # 2. Delete paragraphs
+        await self.db.execute(delete(orm.Paragraph).where(orm.Paragraph.book_id == book_id))
+        # 3. Delete chapters
+        await self.db.execute(delete(orm.Chapter).where(orm.Chapter.book_id == book_id))
+        # 4. Nullify vocabulary word book references
+        await self.db.execute(
+            update(orm.VocabularyWord).where(orm.VocabularyWord.book_id == book_id).values(book_id=None)
+        )
+        # 5. Delete the book itself
         await self.db.execute(delete(orm.Book).where(orm.Book.id == book_id))
         await self.db.commit()
         return file_path
 
 
-# ── Chapter Repository ───────────────────────────────────────────────────────
+# ── Chapter ───────────────────────────────────────────────────────────────
 
 
-class ChapterRepositoryImpl(ChapterRepository):
-    """CRUD for Chapter entities."""
-
-    def __init__(self, db: AsyncSession) -> None:
-        self.db = db
+class ChapterRepositoryImpl(BaseRepositoryImpl, ChapterRepository):
 
     async def add_chapters(self, chapters: List[Chapter]) -> List[Chapter]:
         orm_chapters = []
@@ -182,14 +204,10 @@ class ChapterRepositoryImpl(ChapterRepository):
         await self.db.commit()
 
 
-# ── Paragraph Repository ─────────────────────────────────────────────────────
+# ── Paragraph ─────────────────────────────────────────────────────────────
 
 
-class ParagraphRepositoryImpl(ParagraphRepository):
-    """CRUD for Paragraph entities."""
-
-    def __init__(self, db: AsyncSession) -> None:
-        self.db = db
+class ParagraphRepositoryImpl(BaseRepositoryImpl, ParagraphRepository):
 
     async def add_paragraphs(self, paragraphs: List[Paragraph]) -> None:
         for p in paragraphs:
@@ -212,14 +230,10 @@ class ParagraphRepositoryImpl(ParagraphRepository):
         return [_paragraph_from_orm(p) for p in result.scalars().all()]
 
 
-# ── User Repository ──────────────────────────────────────────────────────────
+# ── User ──────────────────────────────────────────────────────────────────
 
 
-class UserRepositoryImpl(UserRepository):
-    """CRUD for User entities."""
-
-    def __init__(self, db: AsyncSession) -> None:
-        self.db = db
+class UserRepositoryImpl(BaseRepositoryImpl, UserRepository):
 
     async def add(self, user: User) -> User:
         user_orm = orm.User(email=user.email, hashed_password=user.hashed_password)
@@ -241,3 +255,91 @@ class UserRepositoryImpl(UserRepository):
         )
         user_orm = result.scalar_one_or_none()
         return _user_from_orm(user_orm) if user_orm else None
+
+
+# ── Vocabulary ───────────────────────────────────────────────────────────
+
+
+class VocabularyRepositoryImpl(BaseRepositoryImpl):
+    """Repository for user vocabulary words."""
+
+    async def add(
+        self, user_id: int, word: str, *,
+        phonetic: Optional[str] = None,
+        definition: Optional[str] = None,
+        sentence_context: Optional[str] = None,
+        sentence_context_translated: Optional[str] = None,
+        translation: Optional[str] = None,
+        book_id: Optional[int] = None,
+    ) -> orm.VocabularyWord:
+        vocab = orm.VocabularyWord(
+            user_id=user_id,
+            book_id=book_id,
+            word=word,
+            phonetic=phonetic,
+            definition=definition,
+            sentence_context=sentence_context,
+            sentence_context_translated=sentence_context_translated,
+            translation=translation,
+        )
+        self.db.add(vocab)
+        await self.db.commit()
+        await self.db.refresh(vocab)
+        return vocab
+
+    async def list_by_user(self, user_id: int) -> List[orm.VocabularyWord]:
+        result = await self.db.execute(
+            select(orm.VocabularyWord)
+            .where(orm.VocabularyWord.user_id == user_id)
+            .order_by(orm.VocabularyWord.created_at.desc())
+        )
+        return list(result.scalars().all())
+
+    async def list_by_book(self, user_id: int, book_id: int) -> List[orm.VocabularyWord]:
+        result = await self.db.execute(
+            select(orm.VocabularyWord)
+            .where(orm.VocabularyWord.user_id == user_id)
+            .where(orm.VocabularyWord.book_id == book_id)
+            .order_by(orm.VocabularyWord.created_at.desc())
+        )
+        return list(result.scalars().all())
+
+    async def get_by_id(self, word_id: int) -> Optional[orm.VocabularyWord]:
+        result = await self.db.execute(
+            select(orm.VocabularyWord).where(orm.VocabularyWord.id == word_id)
+        )
+        return result.scalar_one_or_none()
+
+    async def find_by_word(self, user_id: int, word: str) -> Optional[orm.VocabularyWord]:
+        """Find a vocabulary word by user_id and word string (case-insensitive)."""
+        result = await self.db.execute(
+            select(orm.VocabularyWord)
+            .where(orm.VocabularyWord.user_id == user_id)
+            .where(orm.VocabularyWord.word.ilike(word))
+            .order_by(orm.VocabularyWord.created_at.desc())
+            .limit(1)
+        )
+        return result.scalar_one_or_none()
+
+    async def update_word(self, word_id: int, **fields) -> bool:
+        """Update specific fields of a vocabulary word. Returns True if updated."""
+        result = await self.db.execute(
+            update(orm.VocabularyWord)
+            .where(orm.VocabularyWord.id == word_id)
+            .values(**fields)
+        )
+        await self.db.commit()
+        return result.rowcount > 0
+
+    async def delete(self, word_id: int) -> bool:
+        result = await self.db.execute(
+            select(orm.VocabularyWord).where(orm.VocabularyWord.id == word_id)
+        )
+        vocab = result.scalar_one_or_none()
+        if vocab is None:
+            return False
+        await self.db.execute(
+            delete(orm.VocabularyWord).where(orm.VocabularyWord.id == word_id)
+        )
+        await self.db.commit()
+        return True
