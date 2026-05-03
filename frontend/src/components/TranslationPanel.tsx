@@ -1,3 +1,5 @@
+import LoadingSpinner from './LoadingSpinner';
+
 interface TranslationPanelProps {
   selectedText: string;
   translationResult: { original: string; translation: string } | null;
@@ -10,6 +12,12 @@ interface TranslationPanelProps {
   onClose: () => void;
 }
 
+const PROVIDERS = [
+  { value: '', label: 'Default' },
+  { value: 'gemini', label: 'Gemini' },
+  { value: 'deepseek', label: 'DeepSeek' },
+];
+
 export default function TranslationPanel({
   selectedText,
   translationResult,
@@ -20,12 +28,6 @@ export default function TranslationPanel({
   onTranslate,
   onClose,
 }: TranslationPanelProps) {
-  const providers = [
-    { value: '', label: 'Default' },
-    { value: 'gemini', label: 'Gemini' },
-    { value: 'deepseek', label: 'DeepSeek' },
-  ];
-
   return (
     <div className="p-4 h-full flex flex-col">
       {/* Header */}
@@ -86,8 +88,7 @@ export default function TranslationPanel({
       {/* Translating state */}
       {translating && (
         <div className="flex flex-col items-center justify-center py-12">
-          <div className="w-8 h-8 border-2 border-current/30 border-t-current rounded-full animate-spin mb-3" />
-          <p className="text-sm opacity-60">Translating...</p>
+          <LoadingSpinner message="Translating..." />
         </div>
       )}
 
@@ -127,7 +128,7 @@ export default function TranslationPanel({
           Translation Engine
         </label>
         <div className="flex gap-2">
-          {providers.map((p) => (
+          {PROVIDERS.map((p) => (
             <button
               key={p.value}
               onClick={() => onProviderChange(p.value)}

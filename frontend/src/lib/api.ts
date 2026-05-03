@@ -48,6 +48,7 @@ async function request<T>(
   options: RequestInit = {},
   auth: boolean = true,
 ): Promise<T> {
+  const isFormData = options.body instanceof FormData;
   const headers: Record<string, string> = {
     ...(options.headers as Record<string, string>),
   };
@@ -59,10 +60,8 @@ async function request<T>(
     }
   }
 
-  if (!(options.body instanceof FormData)) {
-    if (!headers['Content-Type'] && !(options.body instanceof FormData)) {
-      headers['Content-Type'] = 'application/json';
-    }
+  if (!isFormData && !headers['Content-Type']) {
+    headers['Content-Type'] = 'application/json';
   }
 
   const res = await fetch(`${API_BASE}${url}`, {
@@ -186,20 +185,10 @@ export async function getBookDetail(bookId: number): Promise<BookDetailResponse>
 export async function registerBook(file: File): Promise<RegisterBookResponse> {
   const formData = new FormData();
   formData.append('file', file);
-
-  const token = getAccessToken();
-  const res = await fetch(`${API_BASE}/books/register`, {
+  return request<RegisterBookResponse>('/books/register', {
     method: 'POST',
-    headers: { Authorization: `Bearer ${token}` },
     body: formData,
   });
-
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({ detail: res.statusText }));
-    throw new Error(err.detail || 'Failed to upload book');
-  }
-
-  return res.json();
 }
 
 export async function deleteBook(bookId: number): Promise<void> {

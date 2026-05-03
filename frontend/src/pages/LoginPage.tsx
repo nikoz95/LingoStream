@@ -1,6 +1,12 @@
 import { useState, type FormEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../lib/auth';
+import LoadingSpinner from '../components/LoadingSpinner';
+
+const BACKGROUND_BLOBS = [
+  'absolute -top-40 -right-40 w-96 h-96 rounded-full bg-amber-200/20 blur-3xl',
+  'absolute -bottom-40 -left-40 w-96 h-96 rounded-full bg-amber-300/20 blur-3xl',
+];
 
 export default function LoginPage() {
   const { login, register } = useAuth();
@@ -34,8 +40,9 @@ export default function LoginPage() {
     <div className="min-h-screen theme-sepia flex items-center justify-center p-4">
       {/* Background decorative elements */}
       <div className="fixed inset-0 overflow-hidden pointer-events-none">
-        <div className="absolute -top-40 -right-40 w-96 h-96 rounded-full bg-amber-200/20 blur-3xl" />
-        <div className="absolute -bottom-40 -left-40 w-96 h-96 rounded-full bg-amber-300/20 blur-3xl" />
+        {BACKGROUND_BLOBS.map((className, i) => (
+          <div key={i} className={className} />
+        ))}
       </div>
 
       <div className="relative w-full max-w-md">
@@ -107,10 +114,11 @@ export default function LoginPage() {
                 transition-all duration-200 shadow-sm"
             >
               {loading ? (
-                <span className="flex items-center justify-center gap-2">
-                  <span className="w-4 h-4 border-2 border-sepia-bg/30 border-t-sepia-bg rounded-full animate-spin" />
-                  {isRegister ? 'Creating account...' : 'Signing in...'}
-                </span>
+                <LoadingSpinner
+                  message={isRegister ? 'Creating account...' : 'Signing in...'}
+                  light
+                  inline
+                />
               ) : (
                 isRegister ? 'Create Account' : 'Sign In'
               )}

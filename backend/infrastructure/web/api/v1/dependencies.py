@@ -4,7 +4,7 @@ from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from infrastructure.database.postgres.session import get_db
+from infrastructure.database.postgres.session import get_session
 from infrastructure.database.postgres.user_repository_impl import UserRepositoryImpl
 from infrastructure.security import jwt_service as jwt
 from infrastructure.security.token_blacklist import TokenBlacklistService
@@ -33,7 +33,7 @@ async def get_blacklist_service() -> TokenBlacklistService:
 
 async def authenticate_request(
     credentials: Optional[HTTPAuthorizationCredentials] = Depends(security_scheme),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_session),
     blacklist: TokenBlacklistService = Depends(get_blacklist_service),
 ) -> AuthenticatedUser:
     """Dependency that extracts JWT from Authorization header and returns AuthenticatedUser"""

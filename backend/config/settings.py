@@ -1,3 +1,4 @@
+"""Application settings loaded from .env via Pydantic Settings."""
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -15,23 +16,22 @@ class Settings(BaseSettings):
     REDIS_URL: str = "redis://localhost:6379/0"
 
     # ── LLM / Translation ──
-    # Default provider config (fallback)
-    LLM_PROVIDER: str = "openai"           # "openai" or "local"
-    LLM_API_KEY: str = ""                  # OpenAI/Gemini API key (default)
-    LLM_MODEL: str = "gemini-2.5-flash"    # e.g. "gpt-4o-mini", "mistral:7b", "llama3.2"
-    LLM_BASE_URL: str = ""                 # base URL for OpenAI-compatible API
+    LLM_PROVIDER: str = "openai"
+    LLM_API_KEY: str = ""
+    LLM_MODEL: str = "gemini-2.5-flash"
+    LLM_BASE_URL: str = ""
 
-    # Gemini provider config
+    # Gemini provider
     GEMINI_API_KEY: str = ""
     GEMINI_MODEL: str = "gemini-2.5-flash"
     GEMINI_BASE_URL: str = "https://generativelanguage.googleapis.com/v1beta/openai/"
 
-    # DeepSeek provider config
+    # DeepSeek provider
     DEEPSEEK_API_KEY: str = ""
     DEEPSEEK_MODEL: str = "deepseek-chat"
     DEEPSEEK_BASE_URL: str = "https://api.deepseek.com"
 
-    LLM_MAX_CONTEXT_CHARS: int = 3000      # max chars for left/right context windows
+    LLM_MAX_CONTEXT_CHARS: int = 3000
 
     # ── App ──
     DEBUG: bool = False

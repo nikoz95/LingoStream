@@ -12,25 +12,26 @@ docker-compose -f backend/docker-compose.yml up --build -d
 
 ---
 
-## Backend Architecture Map (38 Python files)
+## Backend Architecture (18 Python files)
 
 ### Tech Stack
 - **Python 3.13**, **FastAPI**, **SQLAlchemy 2.0 async**, **PostgreSQL 16**, **Docker**
 - **Architecture**: Clean Architecture (Domain → Infrastructure → Web API)
 - **DI**: Repository pattern via FastAPI's `Depends()` (no class-based DI container)
 - **Validation**: Pydantic v2 for settings + schemas
-- **All I/O is async**: `AsyncSession`, `AsyncClient` for LLM, etc.
+- **All I/O is async**: `AsyncSession`, `AsyncClient` for LLM, Redis `asyncio`
+- **Auth**: JWT (python-jose) + Redis token blacklist (redis-py async)
 
 ### Entry Points
 ```
-main.py              → FastAPI app, lifespan hooks (DB init + client cleanup)
+main.py              → FastAPI app, uvicorn entry point
 init_db.py           → Standalone script, creates tables
 ```
 
 ### Config Layer
 ```
 config/settings.py   → Pydantic BaseSettings, loads from .env
-                       Key groups: DB_*, LLM_*, GEMINI_*, DEEPSEEK_*, JWT_*
+                       Key groups: DB_*, LLM_*, GEMINI_*, DEEPSEEK_*, JWT_*, REDIS_URL
 ```
 
 ### Domain Layer (no external deps except dataclasses/Pydantic)
@@ -40,7 +41,7 @@ domain/entities/
   user.py            → User dataclass
 
 domain/repositories/
-  book_repository.py → ABC: add_book, get_book_by_id, get_user_books, get_chapters, get_paragraphs, upload_book
+  book_repository.py → ABC: add_book, get_book_by_id, get_books_by_user, delete_book, update_book_status
   user_repository.py → ABC: add_user, get_by_email, get_by_id
 ```
 
@@ -51,8 +52,13 @@ domain/repositories/
 infrastructure/database/postgres/
   models.py           → SQLAlchemy ORM: User, Book, Chapter, Paragraph, TranslationRecord
   session.py          → get_session() async generator (AsyncSession via async sessionmaker)
-  book_repository_impl.py → SQLAlchemy async impl of BookRepository ABC
-  user_repository_impl.py → SQLAlchemy async impl of UserRepository ABC
+  book_repository_impl.py → SQLAlchemy async impl:
+      BookRepositoryImpl    → Books (CRUD + status/delete)
+      ChapterRepositoryImpl → Chapters (list/get/mark parsed/add batch)
+      ParagraphRepositoryImpl → Paragraphs (get by chapter/add batch)
+      Extracted ORM mapping helpers: _book_from_orm, _chapter_from_orm, _paragraph_from_orm
+  user_repository_impl.py → SQLAlchemy async impl: UserRepositoryImpl
+      Extracted helper: _user_from_orm
   epub_parser.py      → EPUBParser: lazy chapter-by-chapter, extract_metadata(), extract_toc(), parse_chapter()
   pdf_parser.py       → PDFParser: same interface, PyMuPDF (fitz), lazy per-page, image embedding as base64 <img>
 ```
@@ -65,69 +71,148 @@ infrastructure/ai/
     - Default provider: OpenAI-compatible API (LLM_PROVIDER=openai, LLM_BASE_URL, LLM_API_KEY, LLM_MODEL)
     - Runtime provider override: provider="gemini" | "deepseek"
     - Also supports LLM_PROVIDER=local (Ollama native /api/chat endpoint)
-    - Methods: translate(), _translate_openai(), _translate_local()
-    - Uses httpx.AsyncClient (lazy singleton, closed on app shutdown)
+    - Clean public API: translate(passage, *, left_context, right_context, book_title, source_language, provider)
+    - Provider resolution: _resolve_provider(provider) → (api_key, model, base_url, effective)
+    - Two backends: _call_openai() (static, uses openai SDK), _call_local() (httpx.AsyncClient to Ollama)
+    - Module-level _clean_translation() helper strips quotes/code fences from LLM output
+    - TranslationError exception class for all translation failures
+    - close() method for app shutdown cleanup
 ```
 
 #### Security
 ```
 infrastructure/security/
-  jwt_service.py      → Module-level functions: create_access_token(), decode_access_token()
-                        Uses python-jose, JWT_SECRET_KEY from settings
+  jwt_service.py      → Module-level functions: create_access_token(), create_refresh_token(), decode_token()
+                        Uses python-jose, JWT_SECRET from settings
   password_service.py → Module-level functions: hash_password(), verify_password()
                         Uses passlib bcrypt
-  token_blacklist.py  → In-memory dict-based blacklist for logout
-                        BlacklistToken dataclass with expiry
+  token_blacklist.py  → TokenBlacklistService (Redis-backed)
+                        Methods: blacklist_token(jti, expires_at), is_blacklisted(jti), close()
 ```
 
 #### Web API (FastAPI v1)
 ```
 infrastructure/web/api/v1/
-  app.py               → create_app() factory with exception handlers
-  dependencies.py      → get_current_user() FastAPI dependency (validates JWT from Authorization header)
+  app.py               → create_app() factory with @asynccontextmanager lifespan
+                         Exception handlers: ValidationError, IntegrityError, generic 500
+  dependencies.py      → get_current_user() FastAPI dependency (JWT from Authorization: Bearer header)
+                         authenticate_request() → AuthenticatedUser dataclass (user + token + payload)
+                         get_blacklist_service() → TokenBlacklistService (yield + cleanup)
   routes/
-    auth_router.py      → POST /api/v1/register, POST /api/v1/login (no use-case layer, repos called directly)
-    book_router.py      → POST /api/v1/books/upload, GET /api/v1/books, GET /api/v1/books/{id}/chapters,
-                          GET /api/v1/chapters/{id}/paragraphs, POST /api/v1/translate
+    auth_router.py      → POST /api/v1/register, POST /api/v1/login, POST /api/v1/refresh,
+                          GET /api/v1/me, POST /api/v1/logout
+                          Helper: _build_token_response(user) → TokenResponse
+    book_router.py      → POST /api/v1/books/register, GET /api/v1/books, GET /api/v1/books/{id},
+                          GET /api/v1/books/{id}/chapters, GET /api/v1/books/{id}/chapters/{cid},
+                          GET /api/v1/books/{id}/chapters/{cid}/paragraphs,
+                          POST /api/v1/books/{id}/chapters/{cid}/translate,
+                          POST /api/v1/books/{id}/translate-text,
+                          GET /api/v1/books/{id}/file, DELETE /api/v1/books/{id}
+                          Helpers: _get_parser(), _chapter_to_response(), _paragraph_to_response(),
+                                   get_translation_service() (singleton)
+                          Auto-parses chapters on first access (lazy parsing)
   schemas/
-    auth_schemas.py     → UserRegister, UserLogin, TokenResponse (Pydantic)
-    book_schemas.py     → BookResponse, ChapterResponse, ParagraphResponse, TranslateRequest, TranslateResponse
+    auth_schemas.py     → RegisterRequest, LoginRequest, RefreshTokenRequest, TokenResponse, UserResponse
+    book_schemas.py     → RegisterBookResponse, BookListItem, BookDetailResponse, ChapterResponse,
+                          ChapterParagraphsResponse, ParagraphResponse, TranslatePassageRequest,
+                          TranslatePassageResponse, TranslateTextRequest, TranslateTextResponse
 ```
 
 ### Key Conventions
 - **Imports**: absolute from project root (`from config.settings import settings`)
-- **Naming**: snake_case, `_impl` suffix for repository implementations
-- **Error handling**: `HTTPException` in routes, `logger.error()` in services
+- **Naming**: snake_case, `_impl` suffix for repository implementations, `_` prefix for private helpers
+- **Error handling**: `HTTPException` in routes, `logger.error()` + custom exceptions in services
 - **Response format**: Pydantic models, auto-serialized by FastAPI
 - **Session lifecycle**: `get_session()` async generator → `Depends()` in route handlers
+- **Response builders**: extracted as module-level functions (`_book_from_orm`, `_chapter_to_response`, etc.)
+- **Lazy parsing**: chapters parsed on first access, first chapter parsed immediately on upload
+- **App lifecycle**: `@asynccontextmanager` lifespan hook for startup/shutdown cleanup
 
 ### Auth Flow
-1. `POST /register` → hash password → save user → return JWT
+1. `POST /register` → hash password → save user → return JWT (access + refresh)
 2. `POST /login` → verify password → return JWT
-3. Protected routes: `Authorization: Bearer <token>` → `get_current_user()` → `User` entity
+3. `POST /refresh` → validate refresh token → blacklist old → issue new pair
+4. Protected routes: `Authorization: Bearer <token>` → `authenticate_request()` → `AuthenticatedUser`
+5. `POST /logout` → blacklist access token via `token_blacklist:{jti}` in Redis
 
 ### Book Processing Flow
-1. Upload EPUB/PDF → extract metadata + TOC → save Book + Chapters
-2. Read chapter → `parse_chapter()` extracts paragraphs lazily
-3. Select passage → TranslationService (context-aware) → save TranslationRecord
+1. `POST /books/register` (EPUB/PDF upload) → extract metadata + TOC → save Book + Chapters → parse first chapter → mark "ready"
+2. GET chapter → if not parsed, auto-parse from original file → save Paragraphs → mark chapter parsed
+3. `POST /books/{id}/chapters/{cid}/translate` → select paragraph indices → build passage + context → TranslationService → return translation
+4. `POST /books/{id}/translate-text` → arbitrary text selection → TranslationService
+5. `GET /books/{id}/file` → serve original uploaded file
+6. `DELETE /books/{id}` → delete from DB + remove file from disk
 
 ### Database Schema (SQLAlchemy ORM)
-- **users**: id, email, username, hashed_password, created_at
-- **books**: id, user_id (FK), title, author, language, file_path, file_type, created_at
-- **chapters**: id, book_id (FK), title, spine_index, global_start_index, paragraph_count
-- **paragraphs**: id, chapter_id (FK), global_index, content, metadata (JSON)
+- **users**: id, email, hashed_password, created_at, updated_at
+- **books**: id, user_id (FK), title, author, language, file_path, total_chapters, status, created_at, updated_at
+- **chapters**: id, book_id (FK), title, spine_index, sequence_start, sequence_end, paragraph_count, is_parsed, created_at
+- **paragraphs**: id, book_id (FK), chapter_id (FK), content, index, phonetic_transcription, created_at
 - **translation_records**: id, user_id (FK), paragraph_id (FK), source_text, translated_text, provider, created_at
 
 ### Docker
 - `backend/Dockerfile`: Python 3.13-slim, installs build deps (gcc, libpq-dev, libxml2, etc.)
-- `docker-compose.yml`: postgres:16 (with volume) + backend (builds from Dockerfile)
+- `docker-compose.yml`: postgres:16 (with volume) + redis:7 + backend (builds from Dockerfile)
 - **Always restart without `-v`** to preserve DB data
+
+---
+
+## Frontend Architecture (12 TypeScript/React files)
+
+### Tech Stack
+- **React 19**, **TypeScript**, **Vite**, **Tailwind CSS**
+- **React Router v7** for client-side routing
+- **react-pdf** (pdfjs-dist) for PDF rendering with text layer
+- **localStorage** JWT storage (token, refresh-token) via auth context
+
+### File Map
+```
+frontend/src/
+  main.tsx             → ReactDOM entry
+  App.tsx              → Routes: /login, /library, /reader/:bookId
+  App.css              → Global styles + sepia/night theme variables
+  vite-env.d.ts        → Vite type declarations
+
+  lib/
+    api.ts             → Axios instance + API functions (login, register, getBooks, uploadBook,
+                          getBookFileUrl, translateText). Axios interceptor handles token injection + 401 refresh.
+    auth.tsx           → AuthContext: login(), register(), logout(), getAccessToken()
+                          localStorage: lingostream_token, lingostream_refresh
+
+  components/
+    LoadingSpinner.tsx  → Reusable spinner with message, light variant, inline mode
+    ReaderHeader.tsx    → Top bar with title, page count, theme toggle, sidebar toggle, back/logout
+    TranslationPanel.tsx → Sidebar panel: selected text, translate button, translation output,
+                           provider selector (openai/gemini/deepseek), error/streaming states
+
+  hooks/
+    useContainerWidth.ts → ResizeObserver on PDF container ref
+    usePdfLoader.ts      → Fetches book metadata + PDF blob from API, returns book/loading/error
+    useTextSelection.ts  → Listens for text selection events, returns selectedText + clearSelection
+    useTranslation.ts    → Manages translate(), streaming text, translation result, provider state
+
+  pages/
+    LoginPage.tsx        → Login/Register form with glass card, background blobs, LoadingSpinner
+    LibraryPage.tsx      → Book list with upload button, file input (.pdf,.epub), scrollable grid
+    ReaderPage.tsx       → PDF viewer + translation sidebar, ~150 lines, delegates to hooks + components
+```
+
+### Key Patterns
+- **Custom hooks** for all stateful logic (API calls, selection, translation, resize observer)
+- **Separate components** for UI blocks (LoadingSpinner, ReaderHeader, TranslationPanel)
+- **AuthContext** via React context for global auth state + token management
+- **Axios interceptors** in api.ts for automatic token injection + 401 refresh
+- **Callback memoization** with `useCallback` for event handlers passed as props
+- **CSS themes** via `.theme-sepia` / `.theme-night` class toggles
+- **Loading states** use reusable `<LoadingSpinner>` component with `light`/`inline` variants
+- **Error states** handled inline per component/page
+- **Absolutely no inline spinner HTML** — every page uses `<LoadingSpinner>`
 
 ---
 
 ## Self-Updating Protocol
 
-**Rule**: Every time I complete a task involving backend code changes, I MUST also update `.clinerules` if any of the following changed:
+**Rule**: Every time I complete a task involving code changes, I MUST also update `.clinerules` if any of the following changed:
 
 1. **Files added/deleted/renamed** → update Directory Map
 2. **New packages/dependencies added** → update Tech Stack

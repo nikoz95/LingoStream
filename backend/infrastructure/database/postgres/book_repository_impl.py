@@ -1,202 +1,148 @@
+"""SQLAlchemy async implementations of Book, Chapter, and Paragraph repositories."""
 from typing import Optional, List
+
 from sqlalchemy import select, update, delete
 from sqlalchemy.ext.asyncio import AsyncSession
+
 from domain.entities.book import Book, Chapter, Paragraph
 from domain.repositories.book_repository import BookRepository, ChapterRepository, ParagraphRepository
-from infrastructure.database.postgres.models import (
-    Book as BookDB,
-    Chapter as ChapterDB,
-    Paragraph as ParagraphDB,
-)
+from infrastructure.database.postgres import models as orm
+
+# ── Mapping helpers ──
+
+
+def _book_from_orm(b: orm.Book) -> Book:
+    return Book(
+        id=b.id, title=b.title, author=b.author,
+        file_path=b.file_path, total_chapters=b.total_chapters,
+        language=b.language, status=b.status,
+        created_at=b.created_at, updated_at=b.updated_at,
+    )
+
+
+def _chapter_from_orm(ch: orm.Chapter) -> Chapter:
+    return Chapter(
+        id=ch.id, book_id=ch.book_id,
+        title=ch.title, spine_index=ch.spine_index,
+        sequence_start=ch.sequence_start, sequence_end=ch.sequence_end,
+        paragraph_count=ch.paragraph_count, is_parsed=ch.is_parsed,
+        created_at=ch.created_at,
+    )
+
+
+def _paragraph_from_orm(p: orm.Paragraph) -> Paragraph:
+    return Paragraph(
+        id=p.id, book_id=p.book_id, chapter_id=p.chapter_id,
+        content=p.content, index=p.index,
+        phonetic_transcription=p.phonetic_transcription,
+    )
 
 
 class BookRepositoryImpl(BookRepository):
     def __init__(self, db_session: AsyncSession):
-        self.db_session = db_session
+        self.db = db_session
 
     async def add_book(self, book: Book) -> Book:
-        book_db = BookDB(
-            title=book.title,
-            author=book.author,
-            file_path=book.file_path,
-            total_chapters=book.total_chapters,
-            language=book.language,
-            status=book.status,
+        book_orm = orm.Book(
+            title=book.title, author=book.author,
+            file_path=book.file_path, total_chapters=book.total_chapters,
+            language=book.language, status=book.status,
         )
-        self.db_session.add(book_db)
-        await self.db_session.commit()
-        await self.db_session.refresh(book_db)
-        return Book(
-            id=book_db.id,
-            title=book_db.title,
-            author=book_db.author,
-            file_path=book_db.file_path,
-            total_chapters=book_db.total_chapters,
-            language=book_db.language,
-            status=book_db.status,
-            created_at=book_db.created_at,
-            updated_at=book_db.updated_at,
-        )
+        self.db.add(book_orm)
+        await self.db.commit()
+        await self.db.refresh(book_orm)
+        return _book_from_orm(book_orm)
 
     async def get_book_by_id(self, book_id: int) -> Optional[Book]:
-        result = await self.db_session.execute(
-            select(BookDB).where(BookDB.id == book_id)
-        )
-        book_db = result.scalar_one_or_none()
-        if book_db is None:
-            return None
-        return Book(
-            id=book_db.id,
-            title=book_db.title,
-            author=book_db.author,
-            file_path=book_db.file_path,
-            total_chapters=book_db.total_chapters,
-            language=book_db.language,
-            status=book_db.status,
-            created_at=book_db.created_at,
-            updated_at=book_db.updated_at,
-        )
+        result = await self.db.execute(select(orm.Book).where(orm.Book.id == book_id))
+        book_orm = result.scalar_one_or_none()
+        return _book_from_orm(book_orm) if book_orm else None
 
     async def get_books_by_user(self, user_id: int) -> List[Book]:
-        result = await self.db_session.execute(
-            select(BookDB).order_by(BookDB.created_at.desc())
-        )
-        books_db = result.scalars().all()
-        return [
-            Book(
-                id=b.id, title=b.title, author=b.author,
-                file_path=b.file_path, total_chapters=b.total_chapters,
-                language=b.language, status=b.status,
-                created_at=b.created_at, updated_at=b.updated_at,
-            )
-            for b in books_db
-        ]
+        """Return all books. Note: user_id is accepted for interface compatibility
+        but the current schema does not associate books with users."""
+        result = await self.db.execute(select(orm.Book).order_by(orm.Book.created_at.desc()))
+        return [_book_from_orm(b) for b in result.scalars().all()]
 
     async def update_book_status(self, book_id: int, status: str) -> None:
-        await self.db_session.execute(
-            update(BookDB).where(BookDB.id == book_id).values(status=status)
+        await self.db.execute(
+            update(orm.Book).where(orm.Book.id == book_id).values(status=status)
         )
-        await self.db_session.commit()
+        await self.db.commit()
 
     async def delete_book(self, book_id: int) -> Optional[str]:
-        result = await self.db_session.execute(
-            select(BookDB).where(BookDB.id == book_id)
-        )
-        book_db = result.scalar_one_or_none()
-        if book_db is None:
+        result = await self.db.execute(select(orm.Book).where(orm.Book.id == book_id))
+        book_orm = result.scalar_one_or_none()
+        if book_orm is None:
             return None
-        file_path = book_db.file_path
-        await self.db_session.execute(
-            delete(BookDB).where(BookDB.id == book_id)
-        )
-        await self.db_session.commit()
+        file_path = book_orm.file_path
+        await self.db.execute(delete(orm.Book).where(orm.Book.id == book_id))
+        await self.db.commit()
         return file_path
 
 
 class ChapterRepositoryImpl(ChapterRepository):
     def __init__(self, db_session: AsyncSession):
-        self.db_session = db_session
+        self.db = db_session
 
     async def add_chapters(self, chapters: List[Chapter]) -> List[Chapter]:
-        chapters_db = []
+        orm_chapters = []
         for ch in chapters:
-            ch_db = ChapterDB(
-                book_id=ch.book_id,
-                title=ch.title,
-                spine_index=ch.spine_index,
+            ch_orm = orm.Chapter(
+                book_id=ch.book_id, title=ch.title, spine_index=ch.spine_index,
             )
-            self.db_session.add(ch_db)
-            chapters_db.append(ch_db)
-        await self.db_session.commit()
+            self.db.add(ch_orm)
+            orm_chapters.append(ch_orm)
+        await self.db.commit()
 
         result = []
-        for ch_db in chapters_db:
-            await self.db_session.refresh(ch_db)
-            result.append(Chapter(
-                id=ch_db.id, book_id=ch_db.book_id,
-                title=ch_db.title, spine_index=ch_db.spine_index,
-                sequence_start=ch_db.sequence_start, sequence_end=ch_db.sequence_end,
-                paragraph_count=ch_db.paragraph_count, is_parsed=ch_db.is_parsed,
-                created_at=ch_db.created_at,
-            ))
+        for ch_orm in orm_chapters:
+            await self.db.refresh(ch_orm)
+            result.append(_chapter_from_orm(ch_orm))
         return result
 
     async def get_chapters_by_book(self, book_id: int) -> List[Chapter]:
-        result = await self.db_session.execute(
-            select(ChapterDB)
-            .where(ChapterDB.book_id == book_id)
-            .order_by(ChapterDB.spine_index)
+        result = await self.db.execute(
+            select(orm.Chapter)
+            .where(orm.Chapter.book_id == book_id)
+            .order_by(orm.Chapter.spine_index)
         )
-        chapters_db = result.scalars().all()
-        return [
-            Chapter(
-                id=ch.id, book_id=ch.book_id,
-                title=ch.title, spine_index=ch.spine_index,
-                sequence_start=ch.sequence_start, sequence_end=ch.sequence_end,
-                paragraph_count=ch.paragraph_count, is_parsed=ch.is_parsed,
-                created_at=ch.created_at,
-            )
-            for ch in chapters_db
-        ]
+        return [_chapter_from_orm(ch) for ch in result.scalars().all()]
 
     async def get_chapter_by_id(self, chapter_id: int) -> Optional[Chapter]:
-        result = await self.db_session.execute(
-            select(ChapterDB).where(ChapterDB.id == chapter_id)
+        result = await self.db.execute(
+            select(orm.Chapter).where(orm.Chapter.id == chapter_id)
         )
         ch = result.scalar_one_or_none()
-        if ch is None:
-            return None
-        return Chapter(
-            id=ch.id, book_id=ch.book_id,
-            title=ch.title, spine_index=ch.spine_index,
-            sequence_start=ch.sequence_start, sequence_end=ch.sequence_end,
-            paragraph_count=ch.paragraph_count, is_parsed=ch.is_parsed,
-            created_at=ch.created_at,
-        )
+        return _chapter_from_orm(ch) if ch else None
 
     async def mark_chapter_parsed(
         self, chapter_id: int, seq_start: int, seq_end: int, count: int
     ) -> None:
-        await self.db_session.execute(
-            update(ChapterDB)
-            .where(ChapterDB.id == chapter_id)
-            .values(
-                sequence_start=seq_start,
-                sequence_end=seq_end,
-                paragraph_count=count,
-                is_parsed=True,
-            )
+        await self.db.execute(
+            update(orm.Chapter)
+            .where(orm.Chapter.id == chapter_id)
+            .values(sequence_start=seq_start, sequence_end=seq_end, paragraph_count=count, is_parsed=True)
         )
-        await self.db_session.commit()
+        await self.db.commit()
 
 
 class ParagraphRepositoryImpl(ParagraphRepository):
     def __init__(self, db_session: AsyncSession):
-        self.db_session = db_session
+        self.db = db_session
 
     async def add_paragraphs(self, paragraphs: List[Paragraph]) -> None:
         for p in paragraphs:
-            p_db = ParagraphDB(
-                book_id=p.book_id,
-                chapter_id=p.chapter_id,
-                content=p.content,
-                index=p.index,
-            )
-            self.db_session.add(p_db)
-        await self.db_session.commit()
+            self.db.add(orm.Paragraph(
+                book_id=p.book_id, chapter_id=p.chapter_id,
+                content=p.content, index=p.index,
+            ))
+        await self.db.commit()
 
     async def get_paragraphs_by_chapter(self, chapter_id: int) -> List[Paragraph]:
-        result = await self.db_session.execute(
-            select(ParagraphDB)
-            .where(ParagraphDB.chapter_id == chapter_id)
-            .order_by(ParagraphDB.index)
+        result = await self.db.execute(
+            select(orm.Paragraph)
+            .where(orm.Paragraph.chapter_id == chapter_id)
+            .order_by(orm.Paragraph.index)
         )
-        paragraphs_db = result.scalars().all()
-        return [
-            Paragraph(
-                id=p.id, book_id=p.book_id, chapter_id=p.chapter_id,
-                content=p.content, index=p.index,
-                phonetic_transcription=p.phonetic_transcription,
-            )
-            for p in paragraphs_db
-        ]
+        return [_paragraph_from_orm(p) for p in result.scalars().all()]
