@@ -1,9 +1,92 @@
-@import "tailwindcss";
+@import 'tailwindcss';
 
 @theme {
-  --color-sepia-bg: #f8f0e3;
-  --color-sepia-text: #5b4636;
-  --color-deepnight-bg: #1a1a2e;
-  --color-deepnight-text: #e0e0e0;
-  --color-deepnight-accent: #16213e;
+  --font-sans: 'Inter', system-ui, sans-serif;
+  --font-serif: 'Literata', Georgia, serif;
+
+  --color-sepia-bg: #F4ECD8;
+  --color-sepia-text: #433422;
+  --color-night-bg: #1A1B1E;
+  --color-night-text: #E8E9ED;
+
+  --color-glass: rgba(255, 255, 255, 0.12);
+  --color-glass-border: rgba(255, 255, 255, 0.18);
+  --color-glass-hover: rgba(255, 255, 255, 0.2);
+}
+
+/* Base styles */
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Scrollbar styling */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.15);
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(0, 0, 0, 0.25);
+}
+
+/* Glassmorphism utility */
+.glass {
+  background: var(--color-glass);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid var(--color-glass-border);
+}
+
+/* Reading theme classes */
+.theme-sepia {
+  background-color: var(--color-sepia-bg);
+  color: var(--color-sepia-text);
+}
+
+.theme-sepia .reader-text {
+  color: var(--color-sepia-text);
+}
+
+.theme-night {
+  background-color: var(--color-night-bg);
+  color: var(--color-night-text);
+}
+
+.theme-night .reader-text {
+  color: var(--color-night-text);
+}
+
+/* PDF viewer overrides */
+.pdf-viewer .react-pdf__Page {
+  margin: 0 auto;
+}
+
+.pdf-viewer canvas {
+  width: 100% !important;
+  height: auto !important;
+}
+
+/* Selection highlight for translation */
+::selection {
+  background: rgba(59, 130, 246, 0.3);
+}
+
+/* Smooth transitions for theme switching */
+body, .theme-transition {
+  transition: background-color 0.3s ease, color 0.3s ease;
 }

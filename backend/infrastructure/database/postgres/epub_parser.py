@@ -5,7 +5,15 @@ Key design:
 - register_book(): extracts metadata + TOC/chapter list only (fast, <1s)
 - parse_chapter(): parses only ONE chapter at a time (lazy)
 - parse_chapter_range(): parses a range of chapters (for batch)
+
+HTML preservation:
+- Headings (<h1>-<h6>) are preserved with a CSS class "ls-heading-N"
+- Inline formatting (<b>, <i>, <em>, <strong>, etc.) is preserved
+- Images are extracted from the EPUB and embedded as base64 data URIs
+- Block-level structure (paragraphs, blockquotes, lists) is preserved
 """
+import html
+import base64
 import ebooklib
 from ebooklib import epub
 from typing import List, Tuple, Optional
@@ -48,18 +56,6 @@ class EPUBParser:
         # Try TOC first (nav.xhtml / toc.ncx)
         toc_items = self._flatten_toc(book.toc)
 
-        # Build spine-indexed list of document items
-        doc_items = []
-        for spine_item in book.spine:
-            item_href = spine_item[0] if isinstance(spine_item, tuple) else spine_item.get("href", "")
-            # Find the actual item
-            for item in book.get_items():
-                if item.get_type() == ebooklib.ITEM_DOCUMENT:
-                    item_name = item.get_name()
-                    if item_href in item_name or item_name.endswith(item_href):
-                        doc_items.append((len(doc_items), item))
-                        break
-
         if toc_items:
             # Map TOC titles to spine positions
             for toc_entry in toc_items:
@@ -80,19 +76,21 @@ class EPUBParser:
 
         # Fallback: if no TOC found, treat each document as a chapter
         if not chapters:
-            for idx, item in doc_items:
-                title = self._extract_title_from_html(item.get_content().decode("utf-8"))
-                chapters.append({
-                    "title": title or f"Chapter {idx + 1}",
-                    "spine_index": idx,
-                })
+            for idx, item in enumerate(book.get_items()):
+                if item.get_type() == ebooklib.ITEM_DOCUMENT:
+                    title = self._extract_title_from_html(item.get_content().decode("utf-8"))
+                    chapters.append({
+                        "title": title or f"Chapter {idx + 1}",
+                        "spine_index": idx,
+                    })
 
         return chapters
 
     def parse_chapter(self, file_path: str, spine_index: int, start_global_index: int = 0) -> List[Tuple[int, str]]:
         """
-        Parse paragraphs from a single chapter (spine item) only.
-        Returns list of (global_index, content) tuples.
+        Parse content from a single chapter (spine item) only.
+        Returns list of (global_index, html_content) tuples,
+        where html_content preserves headings, inline formatting, and images.
         """
         book = self._get_book(file_path)
 
@@ -112,21 +110,21 @@ class EPUBParser:
             return []
 
         html_content = target_item.get_content().decode("utf-8")
-        return self._extract_paragraphs(html_content, start_global_index)
+        return self._extract_content_blocks(html_content, start_global_index, book)
 
     def parse_chapter_range(
         self, file_path: str, spine_start: int, spine_end: int, start_global_index: int = 0
     ) -> List[Tuple[int, str]]:
-        """Parse paragraphs from a range of chapters (uses cached book)."""
-        all_paragraphs: List[Tuple[int, str]] = []
+        """Parse content from a range of chapters (uses cached book)."""
+        all_blocks: List[Tuple[int, str]] = []
         current_index = start_global_index
 
         for spine_idx in range(spine_start, spine_end + 1):
-            chapter_pars = self.parse_chapter(file_path, spine_idx, current_index)
-            all_paragraphs.extend(chapter_pars)
-            current_index += len(chapter_pars)
+            chapter_blocks = self.parse_chapter(file_path, spine_idx, current_index)
+            all_blocks.extend(chapter_blocks)
+            current_index += len(chapter_blocks)
 
-        return all_paragraphs
+        return all_blocks
 
     # ── Private helpers ──
 
@@ -137,68 +135,171 @@ class EPUBParser:
             return str(values[0][0])
         return default
 
-    def _flatten_toc(self, toc, prefix: str = "") -> List[dict]:
-        """Flatten nested TOC into a simple list."""
+    def _flatten_toc(self, toc: list, prefix: str = "") -> List[dict]:
+        """Flatten nested TOC structure into a list of {title, href} dicts."""
         items = []
         for entry in toc:
-            if isinstance(entry, tuple):
-                item, sub_items = entry
-                title = item.get("title", "").strip() if isinstance(item, dict) else str(item)
-                href = item.get("href", "") if isinstance(item, dict) else ""
-                items.append({"title": title, "href": href})
-                if sub_items:
-                    items.extend(self._flatten_toc(sub_items, prefix))
-            elif hasattr(entry, "title"):
+            if isinstance(entry, epub.Link):
+                items.append({"title": entry.title, "href": entry.href})
+            elif isinstance(entry, epub.Section):
                 items.append({"title": entry.title, "href": entry.href or ""})
-            elif isinstance(entry, dict):
-                items.append({"title": entry.get("title", ""), "href": entry.get("href", "")})
+            elif isinstance(entry, tuple) and len(entry) >= 2:
+                title = str(entry[0])
+                href = entry[1] if len(entry) > 1 else ""
+                items.append({"title": title, "href": href})
+                # Check for nested children
+                if len(entry) > 2 and isinstance(entry[2], list):
+                    items.extend(self._flatten_toc(entry[2], prefix))
         return items
 
-    def _extract_title_from_html(self, html_content: str) -> Optional[str]:
-        """Extract <title> tag from HTML content."""
+    @staticmethod
+    def _extract_title_from_html(html_content: str) -> Optional[str]:
+        """Extract the first <h1> or <h2> or <title> from HTML content."""
         soup = BeautifulSoup(html_content, "html.parser")
-        title_tag = soup.find("title")
-        if title_tag:
-            return title_tag.get_text(strip=True)
-        # Fallback: try h1
-        h1 = soup.find("h1")
-        if h1:
-            return h1.get_text(strip=True)
+        for tag in ["h1", "h2", "title"]:
+            el = soup.find(tag)
+            if el and el.get_text(strip=True):
+                return el.get_text(strip=True)
         return None
 
-    def _extract_paragraphs(self, html_content: str, start_index: int) -> List[Tuple[int, str]]:
-        """Extract clean paragraphs from HTML content."""
+    @staticmethod
+    def _replace_img_with_base64(soup: BeautifulSoup, book: epub.EpubBook) -> None:
+        """
+        Replace all <img> tags with inline base64 data URIs.
+        Searches the EPUB's items for matching image files.
+        """
+        for img in soup.find_all("img"):
+            src = img.get("src", "")
+            if not src:
+                continue
+
+            # Normalize src (remove "../" prefixes, etc.)
+            # Try to find the image item by matching the filename
+            img_data = None
+            img_mime = "image/png"
+
+            # Get just the filename part
+            src_filename = src.split("/")[-1].split("\\")[-1]
+
+            for item in book.get_items():
+                if item.get_type() == ebooklib.ITEM_IMAGE:
+                    item_name = item.get_name()
+                    # Match by filename or full path
+                    if src_filename and src_filename in item_name:
+                        img_data = item.get_content()
+                        # Determine mime type from file extension
+                        ext = item_name.rsplit(".", 1)[-1].lower() if "." in item_name else "png"
+                        mime_map = {
+                            "png": "image/png",
+                            "jpg": "image/jpeg",
+                            "jpeg": "image/jpeg",
+                            "gif": "image/gif",
+                            "svg": "image/svg+xml",
+                            "webp": "image/webp",
+                        }
+                        img_mime = mime_map.get(ext, "image/png")
+                        break
+
+            if img_data:
+                b64 = base64.b64encode(img_data).decode("ascii")
+                img["src"] = f"data:{img_mime};base64,{b64}"
+            else:
+                # If image not found, remove the tag to avoid broken images
+                img.decompose()
+
+    def _extract_content_blocks(
+        self, html_content: str, start_index: int, book: epub.EpubBook
+    ) -> List[Tuple[int, str]]:
+        """
+        Parse HTML content and extract block-level elements as individual content blocks.
+        Each block is: (global_index, html_string)
+        Headings (<h1>-<h6>) get a CSS class "ls-heading-N" for frontend styling.
+        Images are embedded as base64 data URIs.
+        """
         soup = BeautifulSoup(html_content, "html.parser")
 
-        # Remove script, style, nav elements
-        for tag in soup(["script", "style", "nav"]):
+        # Remove scripts, styles, nav, and other non-content elements
+        for tag in soup(["script", "style", "nav", "aside", "noscript"]):
             tag.decompose()
 
-        paragraphs = []
-        index = start_index
+        # Embed images as base64
+        self._replace_img_with_base64(soup, book)
 
-        # Find all <p> tags
-        for p in soup.find_all("p"):
-            text = p.get_text(strip=True)
-            if text:
-                paragraphs.append((index, text))
-                index += 1
+        blocks: List[Tuple[int, str]] = []
+        idx = start_index
 
-        # If no <p> tags found, treat text blocks as paragraphs
-        if not paragraphs:
-            # Try div > text, or body > direct text
-            body = soup.find("body")
-            if body:
-                for child in body.children:
-                    if child.name is None:
-                        text = child.strip()
-                        if text:
-                            paragraphs.append((index, text))
-                            index += 1
-                    elif child.name in ("div", "section", "span"):
-                        text = child.get_text(strip=True)
-                        if text:
-                            paragraphs.append((index, text))
-                            index += 1
+        # Iterate over all top-level block elements in the body
+        # If no <body>, use the root element
+        body = soup.find("body") or soup
 
-        return paragraphs
+        for element in body.children:
+            # Skip navigational elements and empty text nodes
+            if isinstance(element, str):
+                text = element.strip()
+                if text:
+                    # Plain text outside block tags — wrap in <p>
+                    escaped = html.escape(text)
+                    blocks.append((idx, f"<p>{escaped}</p>"))
+                    idx += 1
+                continue
+
+            tag_name = element.name
+            if tag_name is None:
+                continue
+
+            # Only process block-level elements
+            block_tags = {
+                "p", "div", "blockquote", "pre",
+                "h1", "h2", "h3", "h4", "h5", "h6",
+                "ul", "ol", "li", "dl", "dt", "dd",
+                "table", "tr", "td", "th",
+                "section", "article", "figure", "figcaption",
+                "hr",
+            }
+
+            if tag_name.lower() not in block_tags:
+                # Inline elements at top level — wrap in <p>
+                inner_html = str(element)
+                blocks.append((idx, f"<p>{inner_html}</p>"))
+                idx += 1
+                continue
+
+            # Handle headings: add CSS class
+            if tag_name.lower() in ("h1", "h2", "h3", "h4", "h5", "h6"):
+                level = tag_name[1]  # "1", "2", etc.
+                heading_classes = element.get("class", [])
+                heading_classes.append(f"ls-heading-{level}")
+                element["class"] = heading_classes
+
+            # Handle <img> that might not have been caught by _replace_img_with_base64
+            # (e.g., images inside block-level wrappers)
+            if tag_name.lower() == "img":
+                self._replace_img_with_base64(soup, book)
+
+            # Handle <figure> with images
+            if tag_name.lower() == "figure":
+                self._replace_img_with_base64(soup, book)
+
+            # Convert the element to a clean HTML string
+            inner_html = str(element).strip()
+            if inner_html:
+                blocks.append((idx, inner_html))
+                idx += 1
+
+        # Handle <img> elements that are direct children of body
+        for img in body.find_all("img", recursive=False):
+            inner_html = str(img).strip()
+            if inner_html:
+                blocks.append((idx, inner_html))
+                idx += 1
+
+        return blocks
+
+    @staticmethod
+    def strip_html_to_text(html_content: str) -> str:
+        """
+        Strip all HTML tags and return plain text.
+        Useful for translation endpoints where we only want text.
+        """
+        soup = BeautifulSoup(html_content, "html.parser")
+        return soup.get_text(separator="\n").strip()

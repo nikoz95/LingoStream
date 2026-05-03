@@ -110,9 +110,58 @@ class PDFParser:
 
         return chapters
 
+    def _extract_image_block_html(self, doc: fitz.Document, page: fitz.Page, block: dict) -> str:
+        """Try to extract a dict-mode image block as an HTML <img> with base64-encoded data.
+        
+        Returns empty string if no image could be extracted.
+        """
+        import base64
+        bbox = fitz.Rect(block["bbox"])
+        # Skip very small blocks (likely noise)
+        if (bbox.x1 - bbox.x0) < 20 or (bbox.y1 - bbox.y0) < 20:
+            return ""
+
+        # Check if this image is extractable via xref
+        images = page.get_images(full=True)
+        for img in images:
+            xref = img[0]
+            try:
+                base_img = doc.extract_image(xref)
+                b64 = base64.b64encode(base_img["image"]).decode()
+                return f'<img src="data:image/{base_img["ext"]};base64,{b64}" alt="Illustration" />'
+            except Exception:
+                continue
+
+        # Fallback: render the bbox region as PNG
+        try:
+            pix = page.get_pixmap(dpi=96, clip=bbox)
+            if pix.width > 20 and pix.height > 20:
+                png_bytes = pix.tobytes("png")
+                b64 = base64.b64encode(png_bytes).decode()
+                return f'<img src="data:image/png;base64,{b64}" alt="Illustration" />'
+        except Exception:
+            pass
+
+        return ""
+
+    def _extract_text_from_block(self, block: dict) -> str:
+        """Extract combined text from a dict-mode text block."""
+        lines = block.get("lines", [])
+        parts = []
+        for line in lines:
+            spans = line.get("spans", [])
+            line_parts = []
+            for span in spans:
+                text = span.get("text", "")
+                if text:
+                    line_parts.append(text)
+            parts.append(" ".join(line_parts))
+        return "\n".join(parts)
+
     def parse_chapter(self, file_path: str, spine_index: int, start_global_index: int = 0) -> List[Tuple[int, str]]:
         """
         Parse paragraph-sized text blocks from a single PDF page.
+        Also embeds images as base64 <img> tags (using dict-mode blocks).
         Returns list of (global_index, content) tuples.
         """
         doc = self._get_doc(file_path)
@@ -122,26 +171,42 @@ class PDFParser:
             return []
 
         page = doc[spine_index]
-        # Get text blocks (preserves reading order)
-        blocks = page.get_text("blocks")
+        # Use dict mode to get both text (type=0) and image (type=1) blocks
+        blocks = page.get_text("dict")["blocks"]
         # Sort blocks by vertical then horizontal position
-        blocks.sort(key=lambda b: (b[1], b[0]))  # y0, then x0
+        blocks.sort(key=lambda b: (b["bbox"][1], b["bbox"][0]))  # y0, then x0
 
         idx = start_global_index
         for block in blocks:
-            # block = (x0, y0, x1, y1, text, block_type, ...)
-            text = block[4].strip() if len(block) > 4 else ""
-            if text and len(text) > 20:  # Skip short fragments
-                # Skip page headers/footers (short centered lines)
-                lines = text.split("\n")
-                meaningful = [
-                    l for l in lines
-                    if l.strip() and len(l.strip()) > 3
-                ]
-                if meaningful:
-                    clean = " ".join(meaningful)
-                    paragraphs.append((idx, clean))
+            block_type = block.get("type", 0)
+
+            if block_type == 1:
+                # Image block — try to embed as HTML <img>
+                img_html = self._extract_image_block_html(doc, page, block)
+                if img_html:
+                    paragraphs.append((idx, img_html))
                     idx += 1
+                continue
+
+            # Text block (type=0)
+            text = self._extract_text_from_block(block).strip()
+            if not text:
+                continue
+
+            # Skip very short fragments (likely page numbers / headers)
+            if len(text) <= 10:
+                continue
+
+            # Skip page headers/footers (short centered lines)
+            lines = text.split("\n")
+            meaningful = [
+                l for l in lines
+                if l.strip() and len(l.strip()) > 3
+            ]
+            if meaningful:
+                clean = " ".join(meaningful)
+                paragraphs.append((idx, clean))
+                idx += 1
 
         return paragraphs
 

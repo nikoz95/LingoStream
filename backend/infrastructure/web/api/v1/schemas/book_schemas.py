@@ -90,3 +90,18 @@ class TranslatePassageResponse(BaseModel):
     translation: str                      # Georgian translation
     left_context: str = ""                # preceding context (for reference)
     right_context: str = ""               # following context (for reference)
+
+
+class TranslateTextRequest(BaseModel):
+    """Request to translate arbitrary selected text with surrounding context."""
+    selected_text: str                    # the text the user selected with the mouse
+    left_context: str = ""                # text before the selection (up to ~500 chars)
+    right_context: str = ""               # text after the selection (up to ~500 chars)
+    book_title: str = ""                  # book title for LLM context
+    source_language: str = "en"           # source language
+
+
+class TranslateTextResponse(BaseModel):
+    """Response containing the translation of arbitrary selected text."""
+    original: str
+    translation: str

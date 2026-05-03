@@ -27,10 +27,19 @@ from infrastructure.web.api.v1.schemas.book_schemas import (
     TranslatePassageRequest,
     TranslatePassageResponse,
 )
-from infrastructure.web.api.v1.dependencies import get_current_user
-from infrastructure.ai.translation_service import TranslationService
+from infrastructure.web.api.v1.dependencies import get_current_user, get_blacklist_service
+from infrastructure.security.token_blacklist import TokenBlacklistService
+from infrastructure.security.jwt_service import JWTService
+from infrastructure.database.postgres.user_repository_impl import UserRepositoryImpl
 from domain.entities.user import User
+from infrastructure.ai.translation_service import TranslationService
 from domain.entities.book import Book, Chapter, Paragraph
+from bs4 import BeautifulSoup
+from fastapi.responses import FileResponse
+from infrastructure.web.api.v1.schemas.book_schemas import (
+    TranslateTextRequest,
+    TranslateTextResponse,
+)
 
 # Upload directory — mounted volume or fallback to /tmp
 UPLOAD_DIR = Path(os.getenv("UPLOAD_DIR", "/app/uploads"))
@@ -645,8 +654,12 @@ async def translate_chapter_passage(
         )
     logger.info("translate selected indices validated: %s", selected)
 
+    # Helper: strip HTML to plain text for LLM input
+    def _strip_html(text: str) -> str:
+        return BeautifulSoup(text, "html.parser").get_text(separator="\n").strip()
+
     # Build passage text (concatenate selected paragraphs)
-    passage_parts = [paragraph_map[i] for i in selected]
+    passage_parts = [_strip_html(paragraph_map[i]) for i in selected]
     passage = "\n\n".join(passage_parts)
 
     # Build context windows
@@ -673,8 +686,8 @@ async def translate_chapter_passage(
         else:
             break
 
-    left_context = "\n\n".join(paragraph_map[i] for i in left_ctx_indices)
-    right_context = "\n\n".join(paragraph_map[i] for i in right_ctx_indices)
+    left_context = "\n\n".join(_strip_html(paragraph_map[i]) for i in left_ctx_indices)
+    right_context = "\n\n".join(_strip_html(paragraph_map[i]) for i in right_ctx_indices)
 
     # Call translation service
     translator = TranslationService()
@@ -697,6 +710,111 @@ async def translate_chapter_passage(
         translation=translation,
         left_context=left_context,
         right_context=right_context,
+    )
+
+
+@router.get("/{book_id}/file")
+async def get_book_file(
+    book_id: int,
+    token: str = "",
+    db: AsyncSession = Depends(get_db),
+    blacklist: TokenBlacklistService = Depends(get_blacklist_service),
+):
+    """
+    Serve the original PDF file for client-side rendering with PDF.js.
+
+    Authentication is handled via the `token` query parameter because
+    PDF.js's getDocument() cannot easily set custom HTTP headers.
+    The token is validated (decoded + blacklist check) to ensure the
+    user is authenticated.
+    """
+    # ── Validate token from query parameter ──
+    if not token:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Not authenticated — token query parameter is required",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    payload = JWTService.decode_token(token)
+    if payload is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or expired token",
+        )
+
+    jti = payload.get("jti")
+    if jti is not None:
+        is_blacklisted = await blacklist.is_blacklisted(jti)
+        if is_blacklisted:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Token has been revoked",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+
+    user_id = payload.get("sub")
+    if user_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid token payload",
+        )
+
+    user_repo = UserRepositoryImpl(db)
+    user = await user_repo.get_by_id(int(user_id))
+    if user is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="User not found",
+        )
+
+    # ── Serve the file ──
+    book_repo = BookRepositoryImpl(db)
+    book = await book_repo.get_book_by_id(book_id)
+    if book is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Book not found")
+    if not os.path.exists(book.file_path):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found on disk")
+    return FileResponse(book.file_path, media_type="application/pdf")
+
+
+@router.post(
+    "/{book_id}/translate-text",
+    response_model=TranslateTextResponse,
+)
+async def translate_selected_text(
+    book_id: int,
+    request: TranslateTextRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Translate arbitrary text selected by the user (word, phrase, or paragraph).
+    Uses surrounding text as context for better literary translation quality.
+    """
+    book_repo = BookRepositoryImpl(db)
+    book = await book_repo.get_book_by_id(book_id)
+    if book is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Book not found")
+
+    translator = TranslationService()
+    try:
+        translation = await translator.translate(
+            request.selected_text,
+            left_context=request.left_context,
+            right_context=request.right_context,
+            book_title=book.title,
+            source_language=request.source_language,
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"Translation failed: {str(e)}",
+        )
+
+    return TranslateTextResponse(
+        original=request.selected_text,
+        translation=translation,
     )
 
 

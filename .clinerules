@@ -1,0 +1,13 @@
+# Development Instructions
+
+## Docker Restart Protocol
+After every code change to the backend, restart Docker WITHOUT volumes:
+
+Use the full path to the docker-compose.yml file (since Windows CMD doesn't support `cd dir && command`):
+
+```bash
+docker-compose -f backend/docker-compose.yml down
+docker-compose -f backend/docker-compose.yml up --build -d
+```
+
+**DO NOT** use the `-v` flag with `docker-compose down` (i.e., avoid `docker-compose down -v`), as that would delete the database volume and require re-running `init_db.py`.

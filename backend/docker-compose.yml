@@ -63,11 +63,13 @@ services:
       - .:/app
 
   frontend:
-    build: ../frontend
+    build:
+      context: ../frontend
+      target: development
     ports:
       - "5173:5173"
     environment:
-      - VITE_API_URL=http://localhost:8000
+      - VITE_API_PROXY_TARGET=http://backend:8000
     depends_on:
       - backend
     volumes:
