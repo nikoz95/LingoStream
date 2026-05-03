@@ -34,7 +34,8 @@ export default function ReaderPage() {
   } = useTranslation(book, bookId);
 
   const [numPages, setNumPages] = useState<number | null>(null);
-  const [theme, setTheme] = useState<'sepia' | 'night'>('sepia');
+  const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+  const [theme, setTheme] = useState<'sepia' | 'night'>(prefersDark ? 'night' : 'sepia');
   const [showSidebar, setShowSidebar] = useState(true);
   const { ref: containerRef, width: containerWidth } = useContainerWidth();
 
@@ -138,9 +139,9 @@ export default function ReaderPage() {
               {Array.from(new Array(numPages || 0), (_, index) => (
                 <div
                   key={`page_${index + 1}`}
-                  className="mb-6 rounded-2xl overflow-hidden shadow-lg"
+                  className="mb-6 rounded-2xl overflow-hidden shadow-lg mx-auto"
                   style={{
-                    width: '100%',
+                    width: 'fit-content',
                     maxWidth: 'calc(100vw - 40px)',
                   }}
                 >

@@ -14,15 +14,18 @@
   --color-glass-hover: rgba(255, 255, 255, 0.2);
 }
 
-/* Base styles */
+/* Base styles - always dark default */
 html {
   scroll-behavior: smooth;
+  color-scheme: dark;
 }
 
 body {
   font-family: var(--font-sans);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  background: linear-gradient(135deg, #111827, #581c87, #111827);
+  color: #E8E9ED;
 }
 
 /* Scrollbar styling */
@@ -36,12 +39,12 @@ body {
 }
 
 ::-webkit-scrollbar-thumb {
-  background: rgba(0, 0, 0, 0.15);
+  background: rgba(255, 255, 255, 0.15);
   border-radius: 3px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: rgba(0, 0, 0, 0.25);
+  background: rgba(255, 255, 255, 0.25);
 }
 
 /* Glassmorphism utility */
@@ -52,7 +55,7 @@ body {
   border: 1px solid var(--color-glass-border);
 }
 
-/* Reading theme classes */
+/* Reading theme classes - only used in ReaderPage */
 .theme-sepia {
   background-color: var(--color-sepia-bg);
   color: var(--color-sepia-text);
@@ -83,7 +86,7 @@ body {
 
 /* Selection highlight for translation */
 ::selection {
-  background: rgba(59, 130, 246, 0.3);
+  background: rgba(147, 51, 234, 0.4);
 }
 
 /* Smooth transitions for theme switching */

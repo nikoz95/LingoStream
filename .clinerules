@@ -164,13 +164,17 @@ infrastructure/web/api/v1/
 - **React Router v7** for client-side routing
 - **react-pdf** (pdfjs-dist) for PDF rendering with text layer
 - **localStorage** JWT storage (token, refresh-token) via auth context
+- **Unified UI theme**: purple/dark gradient background (from-gray-900 via-purple-900 to-gray-900) applied via `body` in `index.css`
+- **Reader themes**: sepia/night toggles (default = system `prefers-color-scheme: dark`)
+- **Glassmorphism**: `.glass` utility class with backdrop-blur for cards/headers
 
 ### File Map
 ```
 frontend/src/
   main.tsx             → ReactDOM entry
   App.tsx              → Routes: /login, /library, /reader/:bookId
-  App.css              → Global styles + sepia/night theme variables
+  index.css            → Tailwind import + @theme vars + glass utility + sepia/night theme classes
+                         + body bg gradient (purple/dark), scrollbar styling, PDF viewer overrides
   vite-env.d.ts        → Vite type declarations
 
   lib/
@@ -192,9 +196,10 @@ frontend/src/
     useTranslation.ts    → Manages translate(), streaming text, translation result, provider state
 
   pages/
-    LoginPage.tsx        → Login/Register form with glass card, background blobs, LoadingSpinner
+    LoginPage.tsx        → Purple/dark glass card, background blobs, LoadingSpinner
     LibraryPage.tsx      → Book list with upload button, file input (.pdf,.epub), scrollable grid
-    ReaderPage.tsx       → PDF viewer + translation sidebar, ~150 lines, delegates to hooks + components
+    ReaderPage.tsx       → PDF viewer + translation sidebar, delegates to hooks + components,
+                           dark mode auto-detection via `window.matchMedia('(prefers-color-scheme: dark)')`
 ```
 
 ### Key Patterns
@@ -204,9 +209,11 @@ frontend/src/
 - **Axios interceptors** in api.ts for automatic token injection + 401 refresh
 - **Callback memoization** with `useCallback` for event handlers passed as props
 - **CSS themes** via `.theme-sepia` / `.theme-night` class toggles
+- **Dark mode auto-detection**: ReaderPage uses `window.matchMedia('(prefers-color-scheme: dark)')` to set default reader theme
 - **Loading states** use reusable `<LoadingSpinner>` component with `light`/`inline` variants
 - **Error states** handled inline per component/page
 - **Absolutely no inline spinner HTML** — every page uses `<LoadingSpinner>`
+- **Consistent color palette**: all pages share purple/dark gradient (`from-gray-900 via-purple-900 to-gray-900`) for a unified look
 
 ---
 
