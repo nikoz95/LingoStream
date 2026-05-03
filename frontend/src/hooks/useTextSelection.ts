@@ -145,15 +145,15 @@ export function useTextSelection() {
     }
   }, [getWordAtPoint, getContextAroundWord]);
 
-  // ── Word hover highlight (mouseenter/mouseleave) ──────────────────
+  // ── Word hover highlight (mouseover/mouseout — these bubble, unlike mouseenter/mouseleave) ──
   const hoveredSpan = useRef<HTMLElement | null>(null);
 
-  const handleMouseEnter = useCallback((e: MouseEvent) => {
+  const handleMouseOver = useCallback((e: MouseEvent) => {
     const target = e.target as HTMLElement;
     // Only apply to text spans inside PDF text content layer
     if (!target.closest('.react-pdf__Page__textContent')) return;
     if (target.tagName === 'SPAN' || target.tagName === 'span') {
-      // Remove highlight from previous span
+      // Remove highlight from previous span (if different)
       if (hoveredSpan.current && hoveredSpan.current !== target) {
         hoveredSpan.current.classList.remove('word-hover-highlight');
       }
@@ -162,12 +162,21 @@ export function useTextSelection() {
     }
   }, []);
 
-  const handleMouseLeave = useCallback((e: MouseEvent) => {
+  const handleMouseOut = useCallback((e: MouseEvent) => {
     const target = e.target as HTMLElement;
+    const relatedTarget = e.relatedTarget as HTMLElement | null;
+
+    // Only remove highlight if we're actually leaving this span
+    // (not just moving between sibling spans inside the same parent)
     if (target.tagName === 'SPAN' || target.tagName === 'span') {
+      // If relatedTarget is inside the same text content layer, don't remove
+      if (relatedTarget && relatedTarget.closest('.react-pdf__Page__textContent')) {
+        return; // still inside the text content area — keep highlight
+      }
       target.classList.remove('word-hover-highlight');
     }
-    // Also clear if the mouse leaves the text content layer entirely
+
+    // If leaving the text content layer entirely, also clear tracked span
     if (!target.closest('.react-pdf__Page__textContent') && hoveredSpan.current) {
       hoveredSpan.current.classList.remove('word-hover-highlight');
       hoveredSpan.current = null;
@@ -177,19 +186,19 @@ export function useTextSelection() {
   useEffect(() => {
     document.addEventListener('mousedown', handleMouseDown);
     document.addEventListener('mouseup', handleMouseUp);
-    document.addEventListener('mouseenter', handleMouseEnter, true);
-    document.addEventListener('mouseleave', handleMouseLeave, true);
+    document.addEventListener('mouseover', handleMouseOver, true);
+    document.addEventListener('mouseout', handleMouseOut, true);
     return () => {
       document.removeEventListener('mousedown', handleMouseDown);
       document.removeEventListener('mouseup', handleMouseUp);
-      document.removeEventListener('mouseenter', handleMouseEnter, true);
-      document.removeEventListener('mouseleave', handleMouseLeave, true);
+      document.removeEventListener('mouseover', handleMouseOver, true);
+      document.removeEventListener('mouseout', handleMouseOut, true);
       // Clean up any lingering highlight
       if (hoveredSpan.current) {
         hoveredSpan.current.classList.remove('word-hover-highlight');
       }
     };
-  }, [handleMouseDown, handleMouseUp, handleMouseEnter, handleMouseLeave]);
+  }, [handleMouseDown, handleMouseUp, handleMouseOver, handleMouseOut]);
 
   const clearSelection = useCallback(() => {
     setSelectedText('');

@@ -155,7 +155,7 @@ infrastructure/web/api/v1/
 - **Word phonetic format**: LLM returns 3-part phonetic string: `"word / pronunciation / Georgian script"` for single-word lookups (updated to use `/` separators with proper spacing)
 - **sentence_context_translated**: `translate-word` endpoint returns a `sentence_context_translated` field — the Georgian translation of the sentence context example. Stored in `VocabularyWord.sentence_context_translated` column. Displayed in `TranslationPanel` (amber-tinted block below original context) and `VocabularyPage` (amber-tinted text below italic context).
 - **Auto-clear translation**: ReaderPage auto-closes translation panel and resets "Saved to Vocabulary" state when new text is selected
-- **Word hover highlight**: `.word-hover-highlight` CSS class on index.css applied to PDF text layer spans on mouseenter via useTextSelection
+- **Word hover highlight**: `.word-hover-highlight` CSS class on index.css applied to PDF text layer spans on mouseover/mouseout via useTextSelection (useCapture phase). Uses mouseover/mouseout because mouseenter/mouseleave don't bubble, which caused entire line to highlight instead of individual words. mouseout handler checks `relatedTarget` to prevent flicker when moving between sibling spans.
 - **Translate icon click fix**: useTextSelection ignores clicks outside `.react-pdf__Page__textContent` (prevents translate icon on empty PDF areas)
 - **DB migrations**: `app.py` lifespan runs `ALTER TABLE ... ADD COLUMN IF NOT EXISTS` for schema additions to existing tables (since `create_all` only creates new tables)
 
