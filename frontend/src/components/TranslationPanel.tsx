@@ -4,6 +4,8 @@ interface TranslationPanelProps {
   translationError: string;
   translating: boolean;
   isStreaming?: boolean;
+  provider: string;
+  onProviderChange: (provider: string) => void;
   onTranslate: () => void;
   onClose: () => void;
 }
@@ -13,11 +15,19 @@ export default function TranslationPanel({
   translationResult,
   translationError,
   translating,
+  provider,
+  onProviderChange,
   onTranslate,
   onClose,
 }: TranslationPanelProps) {
+  const providers = [
+    { value: '', label: 'Default' },
+    { value: 'gemini', label: 'Gemini' },
+    { value: 'deepseek', label: 'DeepSeek' },
+  ];
+
   return (
-    <div className="p-4 h-full">
+    <div className="p-4 h-full flex flex-col">
       {/* Header */}
       <div className="flex items-center justify-between mb-4">
         <h2 className="text-sm font-semibold opacity-70 uppercase tracking-wider">
@@ -75,7 +85,7 @@ export default function TranslationPanel({
 
       {/* Translating state */}
       {translating && (
-        <div className="flex flex-col items-center justify-center h-48">
+        <div className="flex flex-col items-center justify-center py-12">
           <div className="w-8 h-8 border-2 border-current/30 border-t-current rounded-full animate-spin mb-3" />
           <p className="text-sm opacity-60">Translating...</p>
         </div>
@@ -110,6 +120,28 @@ export default function TranslationPanel({
           </button>
         </div>
       )}
+
+      {/* Provider selector */}
+      <div className="mt-auto pt-4 border-t border-white/10">
+        <label className="text-xs font-medium opacity-50 uppercase tracking-wider mb-2 block">
+          Translation Engine
+        </label>
+        <div className="flex gap-2">
+          {providers.map((p) => (
+            <button
+              key={p.value}
+              onClick={() => onProviderChange(p.value)}
+              className={`flex-1 py-1.5 text-xs rounded-xl font-medium transition-all duration-200 ${
+                provider === p.value
+                  ? 'bg-white/20 border border-white/20'
+                  : 'bg-white/5 hover:bg-white/10 border border-transparent'
+              }`}
+            >
+              {p.label}
+            </button>
+          ))}
+        </div>
+      </div>
 
       {/* Error state */}
       {translationError && (

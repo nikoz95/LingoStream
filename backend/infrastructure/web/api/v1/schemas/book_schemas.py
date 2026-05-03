@@ -82,6 +82,7 @@ class TranslatePassageRequest(BaseModel):
     left_context_count: int = 1           # how many paragraphs before to include as context
     right_context_count: int = 1          # how many paragraphs after to include as context
     source_language: str = "en"           # source language code
+    provider: Optional[str] = None        # translation provider override: "gemini", "deepseek", or None for default
 
 
 class TranslatePassageResponse(BaseModel):
@@ -99,6 +100,7 @@ class TranslateTextRequest(BaseModel):
     right_context: str = ""               # text after the selection (up to ~500 chars)
     book_title: str = ""                  # book title for LLM context
     source_language: str = "en"           # source language
+    provider: Optional[str] = None        # translation provider override: "gemini", "deepseek", or None for default
 
 
 class TranslateTextResponse(BaseModel):

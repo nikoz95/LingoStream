@@ -698,6 +698,7 @@ async def translate_chapter_passage(
             right_context=right_context,
             book_title=book.title,
             source_language=request.source_language,
+            provider=request.provider,
         )
     except Exception as e:
         raise HTTPException(
@@ -805,6 +806,7 @@ async def translate_selected_text(
             right_context=request.right_context,
             book_title=book.title,
             source_language=request.source_language,
+            provider=request.provider,
         )
     except Exception as e:
         raise HTTPException(

@@ -227,6 +227,7 @@ export interface TranslateTextRequest {
   right_context: string;
   book_title: string;
   source_language: string;
+  provider?: string | null;
 }
 
 export interface TranslateTextResponse {

@@ -39,6 +39,7 @@ export default function ReaderPage() {
   const [streamingText, setStreamingText] = useState('');
   const [translationError, setTranslationError] = useState('');
   const [showSidebar, setShowSidebar] = useState(true);
+  const [translationProvider, setTranslationProvider] = useState('');
 
   // PDF blob URL for CORS isolation
   const [pdfBlobUrl, setPdfBlobUrl] = useState<string>('');
@@ -204,6 +205,7 @@ export default function ReaderPage() {
         right_context: '',
         book_title: book.title,
         source_language: book.language || 'en',
+        provider: translationProvider || null,
       });
       setTranslationResult(result);
     } catch (err) {
@@ -388,6 +390,8 @@ export default function ReaderPage() {
               translationError={translationError}
               translating={translating}
               isStreaming={!!streamingText && !translationResult}
+              provider={translationProvider}
+              onProviderChange={setTranslationProvider}
               onTranslate={handleTranslate}
               onClose={closeTranslation}
             />

@@ -5,9 +5,12 @@ Uses an LLM to translate selected passages from a book into Georgian,
 with awareness of surrounding context (previous/next paragraphs) for
 better idiomatic translation.
 
-Supports two modes:
+Supports multiple providers at runtime:
   1. OpenAI API (via openai Python package)
   2. Local LLM via HTTP (e.g. Ollama, LM Studio, LocalAI, etc.)
+  
+At runtime, the caller can specify a provider override: "gemini", "deepseek",
+or None (uses the default LLM_PROVIDER from settings).
 """
 
 import json
@@ -22,20 +25,22 @@ logger = logging.getLogger(__name__)
 class TranslationService:
     """Translates passages into Georgian with context awareness."""
 
+    # Supported runtime provider aliases and their settings key prefixes
+    PROVIDER_ALIASES = {
+        "gemini":   {"api_key": "GEMINI_API_KEY",   "model": "GEMINI_MODEL",   "base_url": "GEMINI_BASE_URL"},
+        "deepseek": {"api_key": "DEEPSEEK_API_KEY", "model": "DEEPSEEK_MODEL", "base_url": "DEEPSEEK_BASE_URL"},
+    }
+
     def __init__(self):
         self._client: Optional[AsyncClient] = None
-        self._provider = settings.LLM_PROVIDER
-        self._api_key = settings.LLM_API_KEY
-        self._model = settings.LLM_MODEL
-        self._base_url = settings.LLM_BASE_URL
-        self._max_context_chars = settings.LLM_MAX_CONTEXT_CHARS
 
-    async def _get_client(self) -> AsyncClient:
-        if self._client is None:
-            self._client = AsyncClient(
-                base_url=self._base_url,
-                timeout=60.0,
-            )
+    async def _get_client(self, base_url: str) -> AsyncClient:
+        if self._client is not None:
+            return self._client
+        self._client = AsyncClient(
+            base_url=base_url,
+            timeout=60.0,
+        )
         return self._client
 
     async def close(self) -> None:
@@ -51,6 +56,7 @@ class TranslationService:
         right_context: str = "",
         book_title: str = "",
         source_language: str = "en",
+        provider: Optional[str] = None,  # "gemini", "deepseek", or None for default
     ) -> str:
         """
         Translate a passage into Georgian with context awareness.
@@ -61,15 +67,30 @@ class TranslationService:
             right_context: Text after the passage (next paragraphs).
             book_title: Title of the book (for LLM context).
             source_language: Source language code (e.g. 'en', 'de', 'fr').
+            provider: Override provider alias ("gemini", "deepseek") or None for default.
 
         Returns:
             Georgian translation of the passage.
         """
+        # Resolve effective provider config
+        if provider and provider.lower() in self.PROVIDER_ALIASES:
+            alias = self.PROVIDER_ALIASES[provider.lower()]
+            api_key = getattr(settings, alias["api_key"], "") or settings.LLM_API_KEY
+            model = getattr(settings, alias["model"], "") or settings.LLM_MODEL
+            base_url = getattr(settings, alias["base_url"], "") or settings.LLM_BASE_URL
+            effective_provider = "openai"  # All provider aliases use OpenAI-compatible API
+        else:
+            api_key = settings.LLM_API_KEY
+            model = settings.LLM_MODEL
+            base_url = settings.LLM_BASE_URL
+            effective_provider = settings.LLM_PROVIDER
+
         logger.info(
-            "translate_service ENTER provider=%s model=%s base_url=%s book_title=%s source_language=%s "
+            "translate_service ENTER effective_provider=%s model=%s base_url=%s "
+            "requested_provider=%s book_title=%s source_language=%s "
             "passage_len=%d left_ctx_len=%d right_ctx_len=%d",
-            self._provider, self._model, self._base_url,
-            book_title, source_language,
+            effective_provider, model, base_url,
+            provider, book_title, source_language,
             len(passage), len(left_context), len(right_context),
         )
         logger.debug("translate_service passage[:200]=%s", passage[:200])
@@ -78,18 +99,20 @@ class TranslationService:
         if right_context:
             logger.debug("translate_service right_context[:200]=%s", right_context[:200])
 
-        if self._provider == "openai":
+        if effective_provider == "openai":
             result = await self._translate_openai(
                 passage, left_context, right_context,
                 book_title, source_language,
+                api_key=api_key, model=model, base_url=base_url,
             )
-        elif self._provider == "local":
+        elif effective_provider == "local":
             result = await self._translate_local(
                 passage, left_context, right_context,
                 book_title, source_language,
+                model=model, base_url=base_url,
             )
         else:
-            raise ValueError(f"Unsupported LLM provider: {self._provider}")
+            raise ValueError(f"Unsupported LLM provider: {effective_provider}")
 
         logger.info("translate_service SUCCESS result_len=%d", len(result))
         logger.debug("translate_service result[:200]=%s", result[:200])
@@ -104,20 +127,24 @@ class TranslationService:
         right_context: str,
         book_title: str,
         source_language: str,
+        *,
+        api_key: str,
+        model: str,
+        base_url: str,
     ) -> str:
         try:
             import openai
 
             client = openai.AsyncOpenAI(
-                api_key=self._api_key,
-                base_url=self._base_url if self._base_url else None,
+                api_key=api_key,
+                base_url=base_url if base_url else None,
             )
 
             system_prompt = self._build_system_prompt(book_title, source_language)
             user_prompt = self._build_user_prompt(passage, left_context, right_context)
 
             response = await client.chat.completions.create(
-                model=self._model,
+                model=model,
                 messages=[
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_prompt},
@@ -130,7 +157,7 @@ class TranslationService:
             return self._clean_translation(translation)
 
         except Exception as e:
-            logger.error(f"OpenAI translation failed: {e}")
+            logger.error(f"OpenAI-compatible translation failed (model={model}): {e}")
             raise
 
     # ── Local LLM (Ollama native API) ──
@@ -146,14 +173,17 @@ class TranslationService:
         right_context: str,
         book_title: str,
         source_language: str,
+        *,
+        model: str,
+        base_url: str,
     ) -> str:
-        client = await self._get_client()
+        client = await self._get_client(base_url)
 
         system_prompt = self._build_system_prompt(book_title, source_language)
         user_prompt = self._build_user_prompt(passage, left_context, right_context)
 
         payload = {
-            "model": self._model,
+            "model": model,
             "messages": [
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt},
@@ -223,12 +253,12 @@ class TranslationService:
     ) -> str:
         parts = []
 
-        if left_context and len(left_context) <= self._max_context_chars:
+        if left_context and len(left_context) <= settings.LLM_MAX_CONTEXT_CHARS:
             parts.append(f"[PRECEDING CONTEXT]\n{left_context}\n")
 
         parts.append(f"[PASSAGE TO TRANSLATE]\n{passage}\n")
 
-        if right_context and len(right_context) <= self._max_context_chars:
+        if right_context and len(right_context) <= settings.LLM_MAX_CONTEXT_CHARS:
             parts.append(f"[FOLLOWING CONTEXT]\n{right_context}\n")
 
         parts.append("Translate the [PASSAGE TO TRANSLATE] into Georgian. Output ONLY the translation.")
