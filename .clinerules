@@ -3,11 +3,136 @@
 ## Docker Restart Protocol
 After every code change to the backend, restart Docker WITHOUT volumes:
 
-Use the full path to the docker-compose.yml file (since Windows CMD doesn't support `cd dir && command`):
-
 ```bash
 docker-compose -f backend/docker-compose.yml down
 docker-compose -f backend/docker-compose.yml up --build -d
 ```
 
 **DO NOT** use the `-v` flag with `docker-compose down` (i.e., avoid `docker-compose down -v`), as that would delete the database volume and require re-running `init_db.py`.
+
+---
+
+## Backend Architecture Map (38 Python files)
+
+### Tech Stack
+- **Python 3.13**, **FastAPI**, **SQLAlchemy 2.0 async**, **PostgreSQL 16**, **Docker**
+- **Architecture**: Clean Architecture (Domain → Infrastructure → Web API)
+- **DI**: Repository pattern via FastAPI's `Depends()` (no class-based DI container)
+- **Validation**: Pydantic v2 for settings + schemas
+- **All I/O is async**: `AsyncSession`, `AsyncClient` for LLM, etc.
+
+### Entry Points
+```
+main.py              → FastAPI app, lifespan hooks (DB init + client cleanup)
+init_db.py           → Standalone script, creates tables
+```
+
+### Config Layer
+```
+config/settings.py   → Pydantic BaseSettings, loads from .env
+                       Key groups: DB_*, LLM_*, GEMINI_*, DEEPSEEK_*, JWT_*
+```
+
+### Domain Layer (no external deps except dataclasses/Pydantic)
+```
+domain/entities/
+  book.py            → Book, Chapter, Paragraph dataclasses
+  user.py            → User dataclass
+
+domain/repositories/
+  book_repository.py → ABC: add_book, get_book_by_id, get_user_books, get_chapters, get_paragraphs, upload_book
+  user_repository.py → ABC: add_user, get_by_email, get_by_id
+```
+
+### Infrastructure Layer
+
+#### Database (Postgres)
+```
+infrastructure/database/postgres/
+  models.py           → SQLAlchemy ORM: User, Book, Chapter, Paragraph, TranslationRecord
+  session.py          → get_session() async generator (AsyncSession via async sessionmaker)
+  book_repository_impl.py → SQLAlchemy async impl of BookRepository ABC
+  user_repository_impl.py → SQLAlchemy async impl of UserRepository ABC
+  epub_parser.py      → EPUBParser: lazy chapter-by-chapter, extract_metadata(), extract_toc(), parse_chapter()
+  pdf_parser.py       → PDFParser: same interface, PyMuPDF (fitz), lazy per-page, image embedding as base64 <img>
+```
+
+#### AI / LLM
+```
+infrastructure/ai/
+  translation_service.py → TranslationService class
+    - Context-aware literary translation to Georgian
+    - Default provider: OpenAI-compatible API (LLM_PROVIDER=openai, LLM_BASE_URL, LLM_API_KEY, LLM_MODEL)
+    - Runtime provider override: provider="gemini" | "deepseek"
+    - Also supports LLM_PROVIDER=local (Ollama native /api/chat endpoint)
+    - Methods: translate(), _translate_openai(), _translate_local()
+    - Uses httpx.AsyncClient (lazy singleton, closed on app shutdown)
+```
+
+#### Security
+```
+infrastructure/security/
+  jwt_service.py      → Module-level functions: create_access_token(), decode_access_token()
+                        Uses python-jose, JWT_SECRET_KEY from settings
+  password_service.py → Module-level functions: hash_password(), verify_password()
+                        Uses passlib bcrypt
+  token_blacklist.py  → In-memory dict-based blacklist for logout
+                        BlacklistToken dataclass with expiry
+```
+
+#### Web API (FastAPI v1)
+```
+infrastructure/web/api/v1/
+  app.py               → create_app() factory with exception handlers
+  dependencies.py      → get_current_user() FastAPI dependency (validates JWT from Authorization header)
+  routes/
+    auth_router.py      → POST /api/v1/register, POST /api/v1/login (no use-case layer, repos called directly)
+    book_router.py      → POST /api/v1/books/upload, GET /api/v1/books, GET /api/v1/books/{id}/chapters,
+                          GET /api/v1/chapters/{id}/paragraphs, POST /api/v1/translate
+  schemas/
+    auth_schemas.py     → UserRegister, UserLogin, TokenResponse (Pydantic)
+    book_schemas.py     → BookResponse, ChapterResponse, ParagraphResponse, TranslateRequest, TranslateResponse
+```
+
+### Key Conventions
+- **Imports**: absolute from project root (`from config.settings import settings`)
+- **Naming**: snake_case, `_impl` suffix for repository implementations
+- **Error handling**: `HTTPException` in routes, `logger.error()` in services
+- **Response format**: Pydantic models, auto-serialized by FastAPI
+- **Session lifecycle**: `get_session()` async generator → `Depends()` in route handlers
+
+### Auth Flow
+1. `POST /register` → hash password → save user → return JWT
+2. `POST /login` → verify password → return JWT
+3. Protected routes: `Authorization: Bearer <token>` → `get_current_user()` → `User` entity
+
+### Book Processing Flow
+1. Upload EPUB/PDF → extract metadata + TOC → save Book + Chapters
+2. Read chapter → `parse_chapter()` extracts paragraphs lazily
+3. Select passage → TranslationService (context-aware) → save TranslationRecord
+
+### Database Schema (SQLAlchemy ORM)
+- **users**: id, email, username, hashed_password, created_at
+- **books**: id, user_id (FK), title, author, language, file_path, file_type, created_at
+- **chapters**: id, book_id (FK), title, spine_index, global_start_index, paragraph_count
+- **paragraphs**: id, chapter_id (FK), global_index, content, metadata (JSON)
+- **translation_records**: id, user_id (FK), paragraph_id (FK), source_text, translated_text, provider, created_at
+
+### Docker
+- `backend/Dockerfile`: Python 3.13-slim, installs build deps (gcc, libpq-dev, libxml2, etc.)
+- `docker-compose.yml`: postgres:16 (with volume) + backend (builds from Dockerfile)
+- **Always restart without `-v`** to preserve DB data
+
+---
+
+## Self-Updating Protocol
+
+**Rule**: Every time I complete a task involving backend code changes, I MUST also update `.clinerules` if any of the following changed:
+
+1. **Files added/deleted/renamed** → update Directory Map
+2. **New packages/dependencies added** → update Tech Stack
+3. **New conventions introduced** → update Key Conventions
+4. **Architecture pattern changed** (e.g. use-cases removed, class→function conversion) → update Architecture section
+5. **New flows added** → update Auth Flow / Book Processing Flow sections
+
+This ensures that `.clinerules` stays in sync with the actual codebase and future chat sessions get an accurate, token-efficient overview.

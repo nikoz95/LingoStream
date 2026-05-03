@@ -1,82 +1,84 @@
 # LingoStream Backend
 
-Backend implementation of LingoStream using Clean Architecture principles.
+Backend implementation of LingoStream built with FastAPI and Clean Architecture.
 
 ## Project Structure
 
 ```
-lingostream/backend/
-├── domain/               # Enterprise Business Rules
-│   ├── entities/         # Business objects
-│   ├── usecases/         # Application Business Rules
-│   ├── repositories/     # Interfaces (abstract base classes)
-│   └── interfaces/       # Other abstractions (AI, cache)
-├── infrastructure/       # Frameworks & Drivers
-│   ├── database/         # Database implementations
-│   ├── ai/               # AI service implementations
-│   ├── cache/            # Cache implementations
-│   └── web/              # Web framework implementations
-├── config/               # Configuration
-├── tests/                # Unit and integration tests
-├── main.py               # Entry point
-└── requirements.txt      # Dependencies
+backend/
+├── config/                  # Application settings (.env → pydantic-settings)
+│   ├── settings.py
+│   └── __init__.py
+├── domain/                  # Core business logic (pure Python, no framework)
+│   ├── entities/            # Business objects (User, Book, Chapter, Paragraph)
+│   ├── repositories/        # Abstract repository interfaces (ABCs)
+│   └── __init__.py
+├── infrastructure/          # All framework / external-world code
+│   ├── ai/                  # AI / LLM translation service
+│   ├── database/
+│   │   └── postgres/        # SQLAlchemy async models, session, repository impls, parsers
+│   ├── security/            # JWT and password utilities (module-level functions)
+│   └── web/
+│       └── api/v1/          # FastAPI app factory, routes, schemas, dependencies
+├── tests/                   # Test suite
+├── main.py                  # Application entry point
+├── init_db.py               # Database initialisation script
+├── Dockerfile
+├── docker-compose.yml
+└── requirements.txt
 ```
 
-## Clean Architecture Principles Applied
+## Architecture Decisions
 
-1. **Domain Layer**: Pure Python, no dependencies on infrastructure
-2. **Dependency Inversion**: Infrastructure implements domain interfaces
-3. **Dependency Injection**: All dependencies are injected, no global state
-4. **Separation of Concerns**: Clear boundaries between layers
+1. **Domain layer is pure Python** — no SQLAlchemy, no FastAPI, no external framework.
+2. **Infrastructure implements domain interfaces** (Dependency Inversion).
+3. **Module-level functions for stateless services** — `jwt_service.py` and `password_service.py` expose plain functions instead of classes.
+4. **Lazy chapter parsing** — Chapter 1 is parsed immediately on upload; remaining chapters are parsed in the background via `BackgroundTasks`.
+5. **Context-aware translation** — the LLM receives surrounding paragraphs for idiomatic literary translation into Georgian.
 
-## Authentication Module
+## Auth Endpoints
 
-The authentication module implements the following components:
+| Method | Path                    | Description                        |
+|--------|-------------------------|------------------------------------|
+| POST   | /api/v1/auth/register   | Register a new user                |
+| POST   | /api/v1/auth/login      | Login, returns access + refresh    |
+| POST   | /api/v1/auth/refresh    | Refresh an expired access token    |
+| GET    | /api/v1/auth/me         | Get current user profile           |
+| POST   | /api/v1/auth/logout     | Blacklist the current token        |
 
-### Domain Layer
-- `User` entity with id, email, hashed_password, created_at, updated_at
-- `UserRepository` interface with abstract methods for user operations
-- `RegisterUser` use case for user registration
-- `LoginUser` use case for user authentication
+## Book Endpoints
 
-### Infrastructure Layer
-- SQLAlchemy `User` model mapping to database
-- `UserRepositoryImpl` implementing the repository interface
-- Password hashing service using PBKDF2
-- JWT service for token generation and verification
-
-### Web Layer
-- Pydantic schemas for request/response validation
-- Auth router with endpoints for register, login, and get current user
-- Dependency injection for authentication middleware
+| Method | Path                                              | Description                          |
+|--------|---------------------------------------------------|--------------------------------------|
+| POST   | /api/v1/books/register                            | Upload EPUB/PDF, register book       |
+| GET    | /api/v1/books                                     | List all books                       |
+| GET    | /api/v1/books/{id}                                | Book detail with chapter list        |
+| GET    | /api/v1/books/{id}/chapters                       | All chapters for a book              |
+| GET    | /api/v1/books/{id}/chapters/{ch_id}               | Chapter with its paragraphs          |
+| GET    | /api/v1/books/{id}/chapters/{ch_id}/paragraphs    | Flat paragraph list for a chapter    |
+| POST   | /api/v1/books/{id}/chapters/{ch_id}/translate     | Translate selected passage           |
+| POST   | /api/v1/books/{id}/translate-text                 | Translate arbitrary selected text    |
+| GET    | /api/v1/books/{id}/file?token=...                 | Serve the original PDF file          |
+| DELETE | /api/v1/books/{id}                                | Delete book and its data             |
 
 ## Getting Started
 
-1. Install dependencies:
 ```bash
-pip install -r requirements.txt
+# 1. Build and run with Docker
+docker compose -f backend/docker-compose.yml up --build -d
+
+# 2. Run database migrations / seeding
+docker compose -f backend/docker-compose.yml exec api python init_db.py
 ```
 
-2. Set up database:
+Or run directly:
+
 ```bash
-# Create PostgreSQL database
-createdb lingostream
+pip install -r backend/requirements.txt
+python backend/main.py
 ```
-
-3. Run the application:
-```bash
-python main.py
-```
-
-## API Endpoints
-
-- `POST /auth/register` - Register a new user
-- `POST /auth/login` - Login and get JWT token
-- `GET /auth/me` - Get current user information (protected)
 
 ## Testing
 
-Run tests with:
 ```bash
-pytest tests/
-```
+pytest backend/tests/

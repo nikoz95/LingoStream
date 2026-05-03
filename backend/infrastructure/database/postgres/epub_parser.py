@@ -14,9 +14,9 @@ HTML preservation:
 """
 import html
 import base64
+from typing import List, Tuple, Optional
 import ebooklib
 from ebooklib import epub
-from typing import List, Tuple, Optional
 from bs4 import BeautifulSoup
 
 
@@ -112,19 +112,6 @@ class EPUBParser:
         html_content = target_item.get_content().decode("utf-8")
         return self._extract_content_blocks(html_content, start_global_index, book)
 
-    def parse_chapter_range(
-        self, file_path: str, spine_start: int, spine_end: int, start_global_index: int = 0
-    ) -> List[Tuple[int, str]]:
-        """Parse content from a range of chapters (uses cached book)."""
-        all_blocks: List[Tuple[int, str]] = []
-        current_index = start_global_index
-
-        for spine_idx in range(spine_start, spine_end + 1):
-            chapter_blocks = self.parse_chapter(file_path, spine_idx, current_index)
-            all_blocks.extend(chapter_blocks)
-            current_index += len(chapter_blocks)
-
-        return all_blocks
 
     # ── Private helpers ──
 
@@ -295,11 +282,3 @@ class EPUBParser:
 
         return blocks
 
-    @staticmethod
-    def strip_html_to_text(html_content: str) -> str:
-        """
-        Strip all HTML tags and return plain text.
-        Useful for translation endpoints where we only want text.
-        """
-        soup = BeautifulSoup(html_content, "html.parser")
-        return soup.get_text(separator="\n").strip()

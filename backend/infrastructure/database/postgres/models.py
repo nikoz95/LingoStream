@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, DateTime, Text, ForeignKey, Boolean, BigInteger
+from sqlalchemy import Column, Integer, String, DateTime, Text, ForeignKey, Boolean
 from datetime import datetime
 from infrastructure.database.postgres.session import Base
 from sqlalchemy.orm import relationship
@@ -59,11 +59,6 @@ class Paragraph(Base):
     content = Column(Text, nullable=False)
     index = Column(Integer, nullable=False)  # global sequence index in book
     phonetic_transcription = Column(String, nullable=True)
-
-    # Composite index for O(1) paragraph fetching
-    __table_args__ = (
-        {"sqlite_autoincrement": True},  # not needed for pg, but harmless
-    )
 
     # Relationships
     book = relationship("Book", back_populates="paragraphs")

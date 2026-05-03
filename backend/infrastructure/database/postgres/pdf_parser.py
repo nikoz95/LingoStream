@@ -210,16 +210,3 @@ class PDFParser:
 
         return paragraphs
 
-    def parse_chapter_range(
-        self, file_path: str, spine_start: int, spine_end: int, start_global_index: int = 0
-    ) -> List[Tuple[int, str]]:
-        """Parse paragraphs from a range of pages (uses cached doc)."""
-        all_paragraphs: List[Tuple[int, str]] = []
-        current_index = start_global_index
-
-        for spine_idx in range(spine_start, spine_end + 1):
-            chapter_pars = self.parse_chapter(file_path, spine_idx, current_index)
-            all_paragraphs.extend(chapter_pars)
-            current_index += len(chapter_pars)
-
-        return all_paragraphs

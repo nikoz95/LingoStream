@@ -6,7 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from infrastructure.database.postgres.session import get_db
 from infrastructure.database.postgres.user_repository_impl import UserRepositoryImpl
-from infrastructure.security.jwt_service import JWTService
+from infrastructure.security import jwt_service as jwt
 from infrastructure.security.token_blacklist import TokenBlacklistService
 from domain.entities.user import User
 
@@ -45,7 +45,7 @@ async def authenticate_request(
         )
 
     token = credentials.credentials
-    payload = JWTService.decode_token(token)
+    payload = jwt.decode_token(token)
     if payload is None:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -88,30 +88,3 @@ async def get_current_user(
     return auth.user
 
 
-async def get_current_user_optional(
-    credentials: Optional[HTTPAuthorizationCredentials] = Depends(security_scheme),
-    db: AsyncSession = Depends(get_db),
-    blacklist: TokenBlacklistService = Depends(get_blacklist_service),
-) -> Optional[User]:
-    """Like get_current_user but returns None instead of 401 if no token"""
-    if credentials is None:
-        return None
-
-    token = credentials.credentials
-    payload = JWTService.decode_token(token)
-    if payload is None:
-        return None
-
-    # Check blacklist too
-    jti = payload.get("jti")
-    if jti is not None:
-        is_blacklisted = await blacklist.is_blacklisted(jti)
-        if is_blacklisted:
-            return None
-
-    user_id = payload.get("sub")
-    if user_id is None:
-        return None
-
-    user_repo = UserRepositoryImpl(db)
-    return await user_repo.get_by_id(int(user_id))
