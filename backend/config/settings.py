@@ -1,48 +1,70 @@
-"""Application settings loaded from .env via Pydantic Settings."""
-from pydantic_settings import BaseSettings, SettingsConfigDict
+"""Application settings loaded from environment via Pydantic BaseSettings."""
+from pydantic_settings import BaseSettings
 
 
 class Settings(BaseSettings):
-    # ── Database ──
-    DB_URL: str = "postgresql+asyncpg://user:password@localhost:5432/lingostream"
+    """Application configuration — loaded from .env file / environment.
 
-    # ── JWT ──
-    JWT_SECRET: str = "your-secret-key-change-in-production"
+    Groups:
+        DB_*       → PostgreSQL connection
+        LLM_*      → Default LLM (OpenAI-compatible)
+        GEMINI_*   → Google Gemini provider
+        DEEPSEEK_* → DeepSeek provider
+        LOCAL_*    → Ollama local provider
+        JWT_*      → JWT authentication
+        REDIS_URL  → Redis connection
+    """
+
+    # ── Database ──────────────────────────────────────────────
+    DB_HOST: str = "localhost"
+    DB_PORT: int = 5432
+    DB_USER: str = "lingostream"
+    DB_PASSWORD: str = "lingostream"
+    DB_NAME: str = "lingostream"
+    DATABASE_URL: str = ""  # optional override
+
+    @property
+    def db_url(self) -> str:
+        if self.DATABASE_URL:
+            return self.DATABASE_URL
+        return (
+            f"postgresql+asyncpg://{self.DB_USER}:{self.DB_PASSWORD}"
+            f"@{self.DB_HOST}:{self.DB_PORT}/{self.DB_NAME}"
+        )
+
+    # ── LLM (default OpenAI-compatible) ───────────────────────
+    LLM_API_KEY: str = ""
+    LLM_BASE_URL: str = "https://api.openai.com/v1"
+    LLM_MODEL: str = "gpt-4o-mini"
+    LLM_PROVIDER: str = "openai"
+
+    # ── Gemini ────────────────────────────────────────────────
+    GEMINI_API_KEY: str = ""
+    GEMINI_BASE_URL: str = "https://generativelanguage.googleapis.com/v1beta/openai/"
+    GEMINI_MODEL: str = "gemini-2.0-flash"
+
+    # ── DeepSeek ──────────────────────────────────────────────
+    DEEPSEEK_API_KEY: str = ""
+    DEEPSEEK_BASE_URL: str = "https://api.deepseek.com/v1"
+    DEEPSEEK_MODEL: str = "deepseek-chat"
+
+    # ── Ollama (local) ────────────────────────────────────────
+    LOCAL_BASE_URL: str = "http://localhost:11434"
+    LOCAL_MODEL: str = "mistral"
+
+    # ── JWT ───────────────────────────────────────────────────
+    JWT_SECRET: str = "change-me-in-production"
     JWT_ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
     REFRESH_TOKEN_EXPIRE_DAYS: int = 7
 
-    # ── Redis ──
+    # ── Redis ─────────────────────────────────────────────────
     REDIS_URL: str = "redis://localhost:6379/0"
 
-    # ── LLM / Translation ──
-    LLM_PROVIDER: str = "openai"
-    LLM_API_KEY: str = ""
-    LLM_MODEL: str = "gemini-2.5-flash"
-    LLM_BASE_URL: str = ""
+    # ── Uploads ───────────────────────────────────────────────
+    UPLOAD_DIR: str = "uploads"
 
-    # Gemini provider
-    GEMINI_API_KEY: str = ""
-    GEMINI_MODEL: str = "gemini-2.5-flash"
-    GEMINI_BASE_URL: str = "https://generativelanguage.googleapis.com/v1beta/openai/"
-
-    # DeepSeek provider
-    DEEPSEEK_API_KEY: str = ""
-    DEEPSEEK_MODEL: str = "deepseek-chat"
-    DEEPSEEK_BASE_URL: str = "https://api.deepseek.com"
-
-    LLM_MAX_CONTEXT_CHARS: int = 3000
-
-    # ── App ──
-    DEBUG: bool = False
-    APP_NAME: str = "LingoStream"
-
-    model_config = SettingsConfigDict(
-        env_file=".env",
-        env_file_encoding="utf-8",
-        case_sensitive=False,
-        extra="ignore",
-    )
+    model_config = {"env_file": ".env", "extra": "ignore"}
 
 
 settings = Settings()

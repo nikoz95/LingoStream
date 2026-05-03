@@ -1,65 +1,80 @@
-from sqlalchemy import Column, Integer, String, DateTime, Text, ForeignKey, Boolean
-from datetime import datetime
+"""SQLAlchemy ORM models for LingoStream.
+
+All models inherit from the canonical ``Base`` defined in ``session.py``.
+"""
+from datetime import datetime, timezone
+
+from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Integer, String, Text
+
 from infrastructure.database.postgres.session import Base
-from sqlalchemy.orm import relationship
 
 
 class User(Base):
     __tablename__ = "users"
 
-    id = Column(Integer, primary_key=True, index=True)
-    email = Column(String, unique=True, index=True, nullable=False)
-    hashed_password = Column(String, nullable=False)
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    email = Column(String(255), unique=True, nullable=False, index=True)
+    hashed_password = Column(String(255), nullable=False)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+    )
 
 
 class Book(Base):
     __tablename__ = "books"
 
-    id = Column(Integer, primary_key=True, index=True)
-    title = Column(String, index=True, nullable=False)
-    author = Column(String, default="Unknown")
-    file_path = Column(String, nullable=False)
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    title = Column(String(500), nullable=False)
+    author = Column(String(300), default="Unknown Author")
+    language = Column(String(10), default="en")
+    file_path = Column(String(1000), nullable=False)
     total_chapters = Column(Integer, default=0)
-    language = Column(String, default="en")
-    status = Column(String, default="indexed")  # indexed, parsing, ready, error
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
-
-    # Relationships
-    chapters = relationship("Chapter", back_populates="book", cascade="all, delete-orphan")
-    paragraphs = relationship("Paragraph", back_populates="book", cascade="all, delete-orphan")
+    status = Column(String(20), default="indexed")
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+    )
 
 
 class Chapter(Base):
     __tablename__ = "chapters"
 
-    id = Column(Integer, primary_key=True, index=True)
-    book_id = Column(Integer, ForeignKey("books.id", ondelete="CASCADE"), nullable=False, index=True)
-    title = Column(String, nullable=False)
-    spine_index = Column(Integer, nullable=False)  # order in EPUB spine
-    sequence_start = Column(Integer, default=0)    # first paragraph index in book
-    sequence_end = Column(Integer, default=0)      # last paragraph index in book
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    book_id = Column(Integer, ForeignKey("books.id"), nullable=False)
+    title = Column(String(500), nullable=False)
+    spine_index = Column(Integer, default=0)
+    sequence_start = Column(Integer, default=0)
+    sequence_end = Column(Integer, default=0)
     paragraph_count = Column(Integer, default=0)
     is_parsed = Column(Boolean, default=False)
-    created_at = Column(DateTime, default=datetime.utcnow)
-
-    # Relationships
-    book = relationship("Book", back_populates="chapters")
-    paragraphs = relationship("Paragraph", back_populates="chapter", cascade="all, delete-orphan")
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
 
 class Paragraph(Base):
     __tablename__ = "paragraphs"
 
-    id = Column(Integer, primary_key=True, index=True)
-    book_id = Column(Integer, ForeignKey("books.id", ondelete="CASCADE"), nullable=False, index=True)
-    chapter_id = Column(Integer, ForeignKey("chapters.id", ondelete="CASCADE"), nullable=False, index=True)
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    book_id = Column(Integer, ForeignKey("books.id"), nullable=False)
+    chapter_id = Column(Integer, ForeignKey("chapters.id"), nullable=False)
     content = Column(Text, nullable=False)
-    index = Column(Integer, nullable=False)  # global sequence index in book
-    phonetic_transcription = Column(String, nullable=True)
+    index = Column(Integer, nullable=False)
+    phonetic_transcription = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
-    # Relationships
-    book = relationship("Book", back_populates="paragraphs")
-    chapter = relationship("Chapter", back_populates="paragraphs")
+
+class TranslationRecord(Base):
+    __tablename__ = "translation_records"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    paragraph_id = Column(Integer, ForeignKey("paragraphs.id"), nullable=False)
+    source_text = Column(Text, nullable=False)
+    translated_text = Column(Text, nullable=False)
+    provider = Column(String(50), default="openai")
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))

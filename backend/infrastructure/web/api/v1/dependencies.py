@@ -5,7 +5,7 @@ from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from infrastructure.database.postgres.session import get_session
-from infrastructure.database.postgres.user_repository_impl import UserRepositoryImpl
+from infrastructure.database.postgres.repositories import UserRepositoryImpl
 from infrastructure.security import jwt_service as jwt
 from infrastructure.security.token_blacklist import TokenBlacklistService
 from domain.entities.user import User

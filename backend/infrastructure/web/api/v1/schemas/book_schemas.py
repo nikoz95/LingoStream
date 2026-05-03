@@ -1,13 +1,25 @@
-from pydantic import BaseModel
+"""Pydantic schemas for book-related API endpoints."""
 from typing import Optional, List
 from datetime import datetime
 
+from pydantic import BaseModel
 
-class RegisterBookRequest(BaseModel):
-    file_path: str
+
+class BookListItem(BaseModel):
+    """Lightweight book representation for list views."""
+    id: int
+    title: str
+    author: str
+    total_chapters: int
+    language: str
+    status: str
+    created_at: Optional[datetime] = None
+
+    model_config = {"from_attributes": True}
 
 
 class RegisterBookResponse(BaseModel):
+    """Response after uploading and registering a new book."""
     id: int
     title: str
     author: str
@@ -20,6 +32,7 @@ class RegisterBookResponse(BaseModel):
 
 
 class ChapterResponse(BaseModel):
+    """A single chapter within a book."""
     id: int
     book_id: int
     title: str
@@ -34,6 +47,7 @@ class ChapterResponse(BaseModel):
 
 
 class BookDetailResponse(BaseModel):
+    """Full book detail with chapters."""
     id: int
     title: str
     author: str
@@ -48,19 +62,8 @@ class BookDetailResponse(BaseModel):
     model_config = {"from_attributes": True}
 
 
-class BookListItem(BaseModel):
-    id: int
-    title: str
-    author: str
-    total_chapters: int
-    language: str
-    status: str
-    created_at: Optional[datetime] = None
-
-    model_config = {"from_attributes": True}
-
-
 class ParagraphResponse(BaseModel):
+    """A single paragraph within a chapter."""
     id: int
     book_id: int
     chapter_id: int
@@ -72,35 +75,36 @@ class ParagraphResponse(BaseModel):
 
 
 class ChapterParagraphsResponse(BaseModel):
+    """A chapter with all its paragraphs."""
     chapter: ChapterResponse
     paragraphs: List[ParagraphResponse]
 
 
 class TranslatePassageRequest(BaseModel):
     """Request to translate a selected passage from a book chapter."""
-    selected_indices: List[int]           # list of paragraph indices to translate
-    left_context_count: int = 1           # how many paragraphs before to include as context
-    right_context_count: int = 1          # how many paragraphs after to include as context
-    source_language: str = "en"           # source language code
-    provider: Optional[str] = None        # translation provider override: "gemini", "deepseek", or None for default
+    selected_indices: List[int]
+    left_context_count: int = 1
+    right_context_count: int = 1
+    source_language: str = "en"
+    provider: Optional[str] = None
 
 
 class TranslatePassageResponse(BaseModel):
     """Response containing the original passage and its Georgian translation."""
-    original: str                         # concatenated original passage
-    translation: str                      # Georgian translation
-    left_context: str = ""                # preceding context (for reference)
-    right_context: str = ""               # following context (for reference)
+    original: str
+    translation: str
+    left_context: str = ""
+    right_context: str = ""
 
 
 class TranslateTextRequest(BaseModel):
     """Request to translate arbitrary selected text with surrounding context."""
-    selected_text: str                    # the text the user selected with the mouse
-    left_context: str = ""                # text before the selection (up to ~500 chars)
-    right_context: str = ""               # text after the selection (up to ~500 chars)
-    book_title: str = ""                  # book title for LLM context
-    source_language: str = "en"           # source language
-    provider: Optional[str] = None        # translation provider override: "gemini", "deepseek", or None for default
+    selected_text: str
+    left_context: str = ""
+    right_context: str = ""
+    book_title: str = ""
+    source_language: str = "en"
+    provider: Optional[str] = None
 
 
 class TranslateTextResponse(BaseModel):

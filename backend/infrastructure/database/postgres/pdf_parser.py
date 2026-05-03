@@ -1,49 +1,22 @@
 """
-PDF Parser — Lazy parsing architecture (same interface as EPUBParser).
+PDF Parser — lazy page-by-page parsing (same interface as EPUBParser).
 
-Uses PyMuPDF (fitz) to extract text and structure from PDF files.
-Chapters are inferred from page breaks and section headings.
+Uses PyMuPDF (fitz) to extract text and images from PDF files.
+Chapters are inferred from built-in TOC; falls back to scanning for
+headings or treating each page as a chapter.
 """
-import fitz  # PyMuPDF
-from typing import List, Tuple, Optional
+
+import base64
 import re
+from typing import List, Tuple
 
-
-# ── Helpers shared across methods ──
-
-
-def _normalize_title(raw: str) -> str:
-    """Clean up a chapter/section title."""
-    return re.sub(r"\s+", " ", raw).strip()
-
-
-def _is_chapter_heading(text: str) -> bool:
-    """Heuristic: detect if text looks like a chapter heading."""
-    t = text.strip()
-    if not t or len(t) > 200:
-        return False
-    # "Chapter 12", "CHAPTER 12", "Chapter XII"
-    if re.match(r"^(chapter|part|section|lesson|unit)\s", t, re.IGNORECASE):
-        return True
-    # "1.", "12.", "1.2", "I.", "II." (Roman numerals)
-    if re.match(r"^[IVXLCDM]+\..*", t):
-        return True
-    if re.match(r"^\d+(\.\d+)*\s", t):
-        return True
-    return False
-
-
-# ── Parser class ──
+import fitz
 
 
 class PDFParser:
-    """Parser for PDF files with lazy chapter-by-chapter processing.
+    """Parser for PDF files with lazy page-by-page processing."""
 
-    Caches the opened fitz.Document so that multiple calls to parse_chapter()
-    do NOT re-open the PDF file each time.
-    """
-
-    def __init__(self):
+    def __init__(self) -> None:
         self._doc_cache: dict[str, fitz.Document] = {}
 
     def _get_doc(self, file_path: str) -> fitz.Document:
@@ -52,87 +25,103 @@ class PDFParser:
             self._doc_cache[file_path] = fitz.open(file_path)
         return self._doc_cache[file_path]
 
+    @staticmethod
+    def _normalize_title(raw: str) -> str:
+        """Collapse whitespace in a chapter/section title."""
+        return re.sub(r"\s+", " ", raw).strip()
+
+    @staticmethod
+    def _is_chapter_heading(text: str) -> bool:
+        """Heuristic: detect if text looks like a chapter heading."""
+        if not text or len(text) > 200:
+            return False
+        t = text.strip()
+        patterns = [
+            r"^(chapter|part|section|lesson|unit)\s",
+            r"^[IVXLCDM]+\..*",
+            r"^\d+(\.\d+)*\s",
+        ]
+        return any(re.match(p, t, re.IGNORECASE) for p in patterns)
+
     def extract_metadata(self, file_path: str) -> dict:
-        """Extract book metadata without parsing full content."""
+        """Extract title, author, and language from the PDF metadata."""
         doc = self._get_doc(file_path)
         meta = doc.metadata
-        title = meta.get("title", "") or ""
-        author = meta.get("author", "") or ""
-        language = meta.get("language", "en") or "en"
+        title = (meta.get("title") or "").strip()
+        author = (meta.get("author") or "").strip()
+        language = (meta.get("language") or "en").strip()
         return {
-            "title": title if title else file_path.rsplit("/", 1)[-1].rsplit(".", 1)[0],
-            "author": author if author else "Unknown Author",
+            "title": title or file_path.rsplit("/", 1)[-1].rsplit(".", 1)[0],
+            "author": author or "Unknown Author",
             "language": language if len(language) <= 3 else "en",
         }
 
     def extract_toc(self, file_path: str) -> List[dict]:
         """
-        Extract Table of Contents from PDF.
-        First tries the built-in PDF TOC; falls back to page scanning.
-        Returns list of {title, spine_index} where spine_index = page_number (0-based).
+        Extract TOC as [{title, spine_index}, ...].
+
+        Tries the built-in PDF TOC first; falls back to scanning pages for
+        headings, and if still empty treats each page as a separate chapter.
         """
         doc = self._get_doc(file_path)
         chapters: List[dict] = []
 
-        # Try built-in TOC first
+        # Try built-in TOC
         toc = doc.get_toc()
         if toc:
-            for level, title, page in toc:
-                if level == 1:  # Only top-level chapters
-                    chapters.append({
-                        "title": _normalize_title(title),
-                        "spine_index": page - 1,  # PyMuPDF pages are 1-based
-                    })
+            chapters = [
+                {"title": self._normalize_title(title), "spine_index": page - 1}
+                for level, title, page in toc
+                if level == 1
+            ]
             if chapters:
                 return chapters
 
-        # Fallback: scan pages for chapter headings
-        # Sample first 200 pages or entire document
+        # Fallback: scan first 200 pages for headings
         max_pages = min(len(doc), 200)
         for page_num in range(max_pages):
             page = doc[page_num]
             text = page.get_text("text")
             lines = [l.strip() for l in text.split("\n") if l.strip()]
-            for line in lines[:10]:  # Check first 10 lines of each page
-                if _is_chapter_heading(line):
-                    chapters.append({
-                        "title": _normalize_title(line),
-                        "spine_index": page_num,
-                    })
+            for line in lines[:10]:
+                if self._is_chapter_heading(line):
+                    chapters.append(
+                        {"title": self._normalize_title(line), "spine_index": page_num}
+                    )
                     break
 
-        # If still nothing found, treat each page as a chapter
+        # Last resort: each page is a chapter
         if not chapters:
             chapters = [
                 {"title": f"Page {i + 1}", "spine_index": i}
-                for i in range(min(len(doc), max_pages))
+                for i in range(max_pages)
             ]
 
         return chapters
 
-    def _extract_image_block_html(self, doc: fitz.Document, page: fitz.Page, block: dict) -> str:
-        """Try to extract a dict-mode image block as an HTML <img> with base64-encoded data.
-        
-        Returns empty string if no image could be extracted.
-        """
-        import base64
+    def _extract_image_block_html(
+        self, doc: fitz.Document, page: fitz.Page, block: dict
+    ) -> str:
+        """Return a base64 <img> tag for a dict-mode image block, or empty string."""
         bbox = fitz.Rect(block["bbox"])
-        # Skip very small blocks (likely noise)
         if (bbox.x1 - bbox.x0) < 20 or (bbox.y1 - bbox.y0) < 20:
             return ""
 
-        # Check if this image is extractable via xref
+        # Try direct extraction from page images
         images = page.get_images(full=True)
         for img in images:
             xref = img[0]
             try:
                 base_img = doc.extract_image(xref)
                 b64 = base64.b64encode(base_img["image"]).decode()
-                return f'<img src="data:image/{base_img["ext"]};base64,{b64}" alt="Illustration" />'
+                return (
+                    f'<img src="data:image/{base_img["ext"]};base64,{b64}" '
+                    f'alt="Illustration" />'
+                )
             except Exception:
                 continue
 
-        # Fallback: render the bbox region as PNG
+        # Fallback: render the bounding box as a PNG
         try:
             pix = page.get_pixmap(dpi=96, clip=bbox)
             if pix.width > 20 and pix.height > 20:
@@ -144,69 +133,53 @@ class PDFParser:
 
         return ""
 
-    def _extract_text_from_block(self, block: dict) -> str:
+    @staticmethod
+    def _extract_text_from_block(block: dict) -> str:
         """Extract combined text from a dict-mode text block."""
-        lines = block.get("lines", [])
-        parts = []
-        for line in lines:
+        parts: List[str] = []
+        for line in block.get("lines", []):
             spans = line.get("spans", [])
-            line_parts = []
-            for span in spans:
-                text = span.get("text", "")
-                if text:
-                    line_parts.append(text)
-            parts.append(" ".join(line_parts))
+            line_text = " ".join(s.get("text", "") for s in spans if s.get("text"))
+            parts.append(line_text)
         return "\n".join(parts)
 
-    def parse_chapter(self, file_path: str, spine_index: int, start_global_index: int = 0) -> List[Tuple[int, str]]:
+    def parse_chapter(
+        self, file_path: str, spine_index: int, start_global_index: int = 0
+    ) -> List[Tuple[int, str]]:
         """
-        Parse paragraph-sized text blocks from a single PDF page.
-        Also embeds images as base64 <img> tags (using dict-mode blocks).
-        Returns list of (global_index, content) tuples.
+        Parse a single PDF page into (global_index, text) tuples.
+
+        Images are embedded as base64 <img> tags. Blocks are sorted top-to-bottom
+        then left-to-right by their bounding boxes.
         """
         doc = self._get_doc(file_path)
-        paragraphs: List[Tuple[int, str]] = []
 
         if spine_index < 0 or spine_index >= len(doc):
             return []
 
         page = doc[spine_index]
-        # Use dict mode to get both text (type=0) and image (type=1) blocks
         blocks = page.get_text("dict")["blocks"]
-        # Sort blocks by vertical then horizontal position
-        blocks.sort(key=lambda b: (b["bbox"][1], b["bbox"][0]))  # y0, then x0
+        blocks.sort(key=lambda b: (b["bbox"][1], b["bbox"][0]))
 
+        paragraphs: List[Tuple[int, str]] = []
         idx = start_global_index
-        for block in blocks:
-            block_type = block.get("type", 0)
 
-            if block_type == 1:
-                # Image block — try to embed as HTML <img>
+        for block in blocks:
+            if block.get("type", 0) == 1:  # image block
                 img_html = self._extract_image_block_html(doc, page, block)
                 if img_html:
                     paragraphs.append((idx, img_html))
                     idx += 1
                 continue
 
-            # Text block (type=0)
             text = self._extract_text_from_block(block).strip()
-            if not text:
+            if not text or len(text) <= 10:
                 continue
 
-            # Skip very short fragments (likely page numbers / headers)
-            if len(text) <= 10:
-                continue
-
-            # Skip page headers/footers (short centered lines)
             lines = text.split("\n")
-            meaningful = [
-                l for l in lines
-                if l.strip() and len(l.strip()) > 3
-            ]
+            meaningful = [l for l in lines if l.strip() and len(l.strip()) > 3]
             if meaningful:
-                clean = " ".join(meaningful)
-                paragraphs.append((idx, clean))
+                paragraphs.append((idx, " ".join(meaningful)))
                 idx += 1
 
         return paragraphs
-

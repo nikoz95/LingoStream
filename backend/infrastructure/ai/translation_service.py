@@ -1,76 +1,165 @@
 """
-Context-aware translation service.
+Translation Service — context-aware literary translation to Georgian.
 
-Translates selected passages into Georgian with awareness of surrounding
-context (previous/next paragraphs) for better idiomatic translation.
-
-Supports:
-  1. OpenAI-compatible API (default, also used for gemini/deepseek aliases)
-  2. Local LLM via HTTP (Ollama native /api/chat endpoint)
+Architecture:
+- Default provider: OpenAI-compatible API (LLM_PROVIDER=openai)
+- Runtime override: provider="gemini" | "deepseek"
+- Also supports LLM_PROVIDER=local (Ollama native /api/chat endpoint)
+- Clean public API via translate() with left/right context
 """
+import json
 import logging
 from typing import Optional
 
-import openai
-from httpx import AsyncClient
+import httpx
+from openai import AsyncOpenAI
 
 from config.settings import settings
 
 logger = logging.getLogger(__name__)
 
-# ── Provider configuration ──
-
-ProviderConfig = dict[str, str]  # {"api_key": ..., "model": ..., "base_url": ...}
-
-PROVIDER_ALIASES: dict[str, ProviderConfig] = {
-    "gemini": {
-        "api_key": "GEMINI_API_KEY",
-        "model": "GEMINI_MODEL",
-        "base_url": "GEMINI_BASE_URL",
-    },
-    "deepseek": {
-        "api_key": "DEEPSEEK_API_KEY",
-        "model": "DEEPSEEK_MODEL",
-        "base_url": "DEEPSEEK_BASE_URL",
-    },
-}
-
-# Language code → human-readable name for prompts
-LANG_NAMES = {
-    "en": "English",
-    "de": "German",
-    "fr": "French",
-    "es": "Spanish",
-    "it": "Italian",
-    "pt": "Portuguese",
-    "ru": "Russian",
-    "nl": "Dutch",
-    "zh": "Chinese",
-    "ja": "Japanese",
-}
+SYSTEM_PROMPT = (
+    "You are a professional literary translator. Translate the provided text from "
+    "{source_language} to Georgian. Preserve the literary style, tone, and nuances "
+    "of the original text. Use natural, idiomatic Georgian expressions where appropriate. "
+    "The book title is '{book_title}'. Use the provided context (text before and after) "
+    "to ensure translation consistency. Return ONLY the translated text, no explanations."
+)
 
 
 class TranslationError(Exception):
     """Raised when translation fails for any reason."""
 
 
+def _clean_translation(text: str) -> str:
+    """Strip markdown code fences and surrounding quotes from LLM output."""
+    text = text.strip()
+    if text.startswith("```") and text.endswith("```"):
+        text = text[3:-3].strip()
+        if text.startswith(("json", "text", "html")):
+            _, _, text = text.partition("\n")
+    return text.strip('"').strip("'").strip()
+
+
 class TranslationService:
-    """Translates passages into Georgian with context awareness."""
+    """Handles translation of text passages via configurable LLM providers."""
 
     def __init__(self):
-        self._client: Optional[AsyncClient] = None
+        self._client: Optional[AsyncOpenAI] = None
+        self._http_client: Optional[httpx.AsyncClient] = None
+        self._local_client: Optional[httpx.AsyncClient] = None
 
-    async def _get_client(self, base_url: str) -> AsyncClient:
-        if self._client is None:
-            self._client = AsyncClient(base_url=base_url, timeout=60.0)
-        return self._client
+    def _resolve_provider(self, provider: Optional[str] = None):
+        """Resolve API credentials and model for the given provider.
 
-    async def close(self) -> None:
-        if self._client:
-            await self._client.aclose()
-            self._client = None
+        Returns (api_key, model, base_url, effective_provider_name).
+        """
+        effective = provider or settings.LLM_PROVIDER
 
-    # ── Public API ──
+        if effective == "gemini":
+            return (
+                settings.GEMINI_API_KEY,
+                settings.GEMINI_MODEL,
+                settings.GEMINI_BASE_URL,
+                effective,
+            )
+        if effective == "deepseek":
+            return (
+                settings.DEEPSEEK_API_KEY,
+                settings.DEEPSEEK_MODEL,
+                settings.DEEPSEEK_BASE_URL,
+                effective,
+            )
+        if effective == "local":
+            return ("", settings.LOCAL_MODEL, settings.LOCAL_BASE_URL, effective)
+
+        # Default: OpenAI-compatible
+        return (
+            settings.LLM_API_KEY,
+            settings.LLM_MODEL,
+            settings.LLM_BASE_URL,
+            effective,
+        )
+
+    async def _call_openai(
+        self,
+        passage: str,
+        left_context: str,
+        right_context: str,
+        book_title: str,
+        source_language: str,
+        api_key: str,
+        model: str,
+        base_url: str,
+    ) -> str:
+        """Translate via OpenAI-compatible chat API."""
+        self._client = AsyncOpenAI(api_key=api_key, base_url=base_url)
+
+        messages = [
+            {
+                "role": "system",
+                "content": SYSTEM_PROMPT.format(
+                    source_language=source_language, book_title=book_title
+                ),
+            },
+        ]
+
+        if left_context:
+            messages.append({"role": "user", "content": f"Context before:\n{left_context}"})
+            messages.append({"role": "assistant", "content": "Understood, I'll use this as context."})
+
+        if right_context:
+            messages.append({"role": "user", "content": f"Context after:\n{right_context}"})
+            messages.append({"role": "assistant", "content": "Understood, I'll use this as context."})
+
+        messages.append({"role": "user", "content": f"Translate:\n{passage}"})
+
+        response = await self._client.chat.completions.create(
+            model=model,
+            messages=messages,
+            temperature=0.3,
+            max_tokens=4096,
+        )
+
+        content = response.choices[0].message.content or ""
+        return _clean_translation(content)
+
+    async def _call_local(
+        self,
+        passage: str,
+        left_context: str,
+        right_context: str,
+        book_title: str,
+        source_language: str,
+        model: str,
+        base_url: str,
+    ) -> str:
+        """Translate via Ollama local API (/api/chat endpoint)."""
+        self._local_client = httpx.AsyncClient(base_url=base_url, timeout=120.0)
+
+        system_content = SYSTEM_PROMPT.format(
+            source_language=source_language, book_title=book_title
+        )
+
+        messages = [{"role": "system", "content": system_content}]
+
+        if left_context:
+            messages.append({"role": "user", "content": f"Context before:\n{left_context}"})
+            messages.append({"role": "assistant", "content": "Understood."})
+
+        if right_context:
+            messages.append({"role": "user", "content": f"Context after:\n{right_context}"})
+            messages.append({"role": "assistant", "content": "Understood."})
+
+        messages.append({"role": "user", "content": f"Translate:\n{passage}"})
+
+        payload = {"model": model, "messages": messages, "stream": False}
+
+        response = await self._local_client.post("/api/chat", json=payload)
+        response.raise_for_status()
+        data = response.json()
+        content = data.get("message", {}).get("content", "")
+        return _clean_translation(content)
 
     async def translate(
         self,
@@ -82,149 +171,40 @@ class TranslationService:
         source_language: str = "en",
         provider: Optional[str] = None,
     ) -> str:
-        """Translate *passage* into Georgian.
+        """Translate a passage of text to Georgian.
 
         Args:
-            passage: The selected text to translate.
-            left_context: Text before the passage.
-            right_context: Text after the passage.
-            book_title: Book title (for LLM context).
-            source_language: Source language code.
-            provider: Override provider alias ("gemini", "deepseek") or *None* for default.
+            passage: The text to translate.
+            left_context: Surrounding text before the passage.
+            right_context: Surrounding text after the passage.
+            book_title: Title of the book for LLM context.
+            source_language: Language code of the source text.
+            provider: Override provider ("gemini", "deepseek", "local", or None for default).
 
         Returns:
-            Georgian translation of the passage.
+            The translated text.
         """
         api_key, model, base_url, effective = self._resolve_provider(provider)
 
-        logger.info(
-            "translate effective_provider=%s model=%s passage_len=%d "
-            "left_ctx=%d right_ctx=%d book=%s lang=%s",
-            effective, model, len(passage), len(left_context), len(right_context),
-            book_title, source_language,
-        )
-
-        system = self._build_system_prompt(book_title, source_language)
-        user = self._build_user_prompt(passage, left_context, right_context)
-
         try:
-            if effective == "openai":
-                result = await self._call_openai(system, user, api_key, model, base_url)
-            elif effective == "local":
-                result = await self._call_local(system, user, model, base_url)
-            else:
-                raise TranslationError(f"Unsupported provider: {effective}")
+            if effective == "local":
+                return await self._call_local(
+                    passage, left_context, right_context,
+                    book_title, source_language, model, base_url,
+                )
+            return await self._call_openai(
+                passage, left_context, right_context,
+                book_title, source_language, api_key, model, base_url,
+            )
         except Exception as exc:
-            logger.error("Translation failed (provider=%s model=%s): %s", effective, model, exc)
+            logger.error("Translation failed (provider=%s): %s", effective, exc)
             raise TranslationError(str(exc)) from exc
 
-        logger.info("translate SUCCESS (%d chars)", len(result))
-        return result
-
-    # ── Provider resolution ──
-
-    @staticmethod
-    def _resolve_provider(provider: Optional[str]) -> tuple[str, str, str, str]:
-        """Resolve (api_key, model, base_url, effective_provider)."""
-        if provider and provider.lower() in PROVIDER_ALIASES:
-            alias = PROVIDER_ALIASES[provider.lower()]
-            return (
-                getattr(settings, alias["api_key"], "") or settings.LLM_API_KEY,
-                getattr(settings, alias["model"], "") or settings.LLM_MODEL,
-                getattr(settings, alias["base_url"], "") or settings.LLM_BASE_URL,
-                "openai",
-            )
-        return (
-            settings.LLM_API_KEY,
-            settings.LLM_MODEL,
-            settings.LLM_BASE_URL,
-            settings.LLM_PROVIDER,
-        )
-
-    # ── OpenAI-compatible backend ──
-
-    @staticmethod
-    async def _call_openai(
-        system: str, user: str,
-        api_key: str, model: str, base_url: str,
-    ) -> str:
-        client = openai.AsyncOpenAI(api_key=api_key, base_url=base_url or None)
-        response = await client.chat.completions.create(
-            model=model,
-            messages=[
-                {"role": "system", "content": system},
-                {"role": "user", "content": user},
-            ],
-            temperature=0.3,
-            max_tokens=2000,
-        )
-        raw = response.choices[0].message.content.strip()
-        return _clean_translation(raw)
-
-    # ── Local LLM (Ollama native API) backend ──
-
-    async def _call_local(
-        self, system: str, user: str,
-        model: str, base_url: str,
-    ) -> str:
-        client = await self._get_client(base_url)
-        payload = {
-            "model": model,
-            "messages": [
-                {"role": "system", "content": system},
-                {"role": "user", "content": user},
-            ],
-            "options": {"temperature": 0.3, "num_predict": 2000},
-            "stream": False,
-        }
-        resp = await client.post("/api/chat", json=payload)
-        resp.raise_for_status()
-        data = resp.json()
-        raw = data["message"]["content"]
-        return _clean_translation(raw)
-
-    # ── Prompt builders ──
-
-    @staticmethod
-    def _build_system_prompt(book_title: str, source_language: str) -> str:
-        lang_name = LANG_NAMES.get(source_language, "English")
-        lines = [
-            "You are a professional literary translator. Your ONLY task is to translate text from",
-            f"{lang_name} into Georgian (ქართული).",
-            "",
-            "RULES:",
-            "1. Output ONLY the Georgian translation — no explanations, no notes, no commentary.",
-            "2. Use natural, idiomatic Georgian. The translation should sound like it was originally written in Georgian.",
-            "3. Use the surrounding context (the paragraphs before and after) to disambiguate meaning.",
-            "4. Preserve the tone, register, and style of the original passage.",
-            "5. If the passage contains dialogue, keep it natural in Georgian.",
-            "6. If the passage contains cultural references, adapt them appropriately for a Georgian reader where possible.",
-            "7. Keep paragraph breaks if the passage spans multiple paragraphs.",
-        ]
-        if book_title:
-            lines.insert(1, f'The source text is from the book: "{book_title}".')
-        return "\n".join(lines)
-
-    @staticmethod
-    def _build_user_prompt(passage: str, left_context: str, right_context: str) -> str:
-        parts = []
-        max_chars = settings.LLM_MAX_CONTEXT_CHARS
-
-        if left_context and len(left_context) <= max_chars:
-            parts.append(f"[PRECEDING CONTEXT]\n{left_context}\n")
-        parts.append(f"[PASSAGE TO TRANSLATE]\n{passage}\n")
-        if right_context and len(right_context) <= max_chars:
-            parts.append(f"[FOLLOWING CONTEXT]\n{right_context}\n")
-        parts.append("Translate the [PASSAGE TO TRANSLATE] into Georgian. Output ONLY the translation.")
-        return "\n".join(parts)
-
-
-# ── Module-level helpers ──
-
-
-def _clean_translation(raw: str) -> str:
-    """Remove any unwanted preamble/postamble from the LLM response."""
-    raw = raw.strip().strip('"').strip("'").strip()
-    if raw.startswith("```") and raw.endswith("```"):
-        raw = raw[3:-3].strip()
-    return raw
+    async def close(self) -> None:
+        """Clean up HTTP clients on app shutdown."""
+        if self._client:
+            await self._client.close()
+        if self._http_client:
+            await self._http_client.aclose()
+        if self._local_client:
+            await self._local_client.aclose()

@@ -12,7 +12,7 @@ docker-compose -f backend/docker-compose.yml up --build -d
 
 ---
 
-## Backend Architecture (18 Python files)
+## Backend Architecture
 
 ### Tech Stack
 - **Python 3.13**, **FastAPI**, **SQLAlchemy 2.0 async**, **PostgreSQL 16**, **Docker**
@@ -24,7 +24,7 @@ docker-compose -f backend/docker-compose.yml up --build -d
 
 ### Entry Points
 ```
-main.py              → FastAPI app, uvicorn entry point
+main.py              → FastAPI app, uvicorn entry point (reload=True)
 init_db.py           → Standalone script, creates tables
 ```
 
@@ -51,14 +51,11 @@ domain/repositories/
 ```
 infrastructure/database/postgres/
   models.py           → SQLAlchemy ORM: User, Book, Chapter, Paragraph, TranslationRecord
-  session.py          → get_session() async generator (AsyncSession via async sessionmaker)
-  book_repository_impl.py → SQLAlchemy async impl:
-      BookRepositoryImpl    → Books (CRUD + status/delete)
-      ChapterRepositoryImpl → Chapters (list/get/mark parsed/add batch)
-      ParagraphRepositoryImpl → Paragraphs (get by chapter/add batch)
-      Extracted ORM mapping helpers: _book_from_orm, _chapter_from_orm, _paragraph_from_orm
-  user_repository_impl.py → SQLAlchemy async impl: UserRepositoryImpl
-      Extracted helper: _user_from_orm
+  session.py          → engine, Base (DeclarativeBase), get_session() async generator
+  repositories.py     → Consolidated impls: BookRepositoryImpl, ChapterRepositoryImpl,
+                         ParagraphRepositoryImpl, UserRepositoryImpl
+                         All ORM-to-entity helpers: _book_from_orm, _chapter_from_orm,
+                         _paragraph_from_orm, _user_from_orm
   epub_parser.py      → EPUBParser: lazy chapter-by-chapter, extract_metadata(), extract_toc(), parse_chapter()
   pdf_parser.py       → PDFParser: same interface, PyMuPDF (fitz), lazy per-page, image embedding as base64 <img>
 ```
@@ -73,7 +70,7 @@ infrastructure/ai/
     - Also supports LLM_PROVIDER=local (Ollama native /api/chat endpoint)
     - Clean public API: translate(passage, *, left_context, right_context, book_title, source_language, provider)
     - Provider resolution: _resolve_provider(provider) → (api_key, model, base_url, effective)
-    - Two backends: _call_openai() (static, uses openai SDK), _call_local() (httpx.AsyncClient to Ollama)
+    - Two backends: _call_openai() (uses openai SDK), _call_local() (httpx.AsyncClient to Ollama)
     - Module-level _clean_translation() helper strips quotes/code fences from LLM output
     - TranslationError exception class for all translation failures
     - close() method for app shutdown cleanup
@@ -94,23 +91,24 @@ infrastructure/security/
 ```
 infrastructure/web/api/v1/
   app.py               → create_app() factory with @asynccontextmanager lifespan
-                         Exception handlers: ValidationError, IntegrityError, generic 500
-  dependencies.py      → get_current_user() FastAPI dependency (JWT from Authorization: Bearer header)
-                         authenticate_request() → AuthenticatedUser dataclass (user + token + payload)
+                         Exposes translation_service singleton (module-level var)
+                         Includes CORS middleware + route prefixes
+                         Tables auto-created at startup via lifespan
+  dependencies.py      → authenticate_request() → AuthenticatedUser dataclass (user + token + payload)
+                         get_current_user() → User (for backward compatibility)
                          get_blacklist_service() → TokenBlacklistService (yield + cleanup)
   routes/
-    auth_router.py      → POST /api/v1/register, POST /api/v1/login, POST /api/v1/refresh,
-                          GET /api/v1/me, POST /api/v1/logout
+    auth_router.py      → POST /api/v1/auth/register, /login, /refresh, /logout, GET /api/v1/auth/me
                           Helper: _build_token_response(user) → TokenResponse
     book_router.py      → POST /api/v1/books/register, GET /api/v1/books, GET /api/v1/books/{id},
                           GET /api/v1/books/{id}/chapters, GET /api/v1/books/{id}/chapters/{cid},
                           GET /api/v1/books/{id}/chapters/{cid}/paragraphs,
-                          POST /api/v1/books/{id}/chapters/{cid}/translate,
-                          POST /api/v1/books/{id}/translate-text,
                           GET /api/v1/books/{id}/file, DELETE /api/v1/books/{id}
-                          Helpers: _get_parser(), _chapter_to_response(), _paragraph_to_response(),
-                                   get_translation_service() (singleton)
+                          Helpers: _get_parser(), _chapter_to_response(), _paragraph_to_response()
                           Auto-parses chapters on first access (lazy parsing)
+    translation_router.py → POST /api/v1/books/{id}/chapters/{cid}/translate,
+                            POST /api/v1/books/{id}/translate-text
+                            Uses app.translation_service singleton
   schemas/
     auth_schemas.py     → RegisterRequest, LoginRequest, RefreshTokenRequest, TokenResponse, UserResponse
     book_schemas.py     → RegisterBookResponse, BookListItem, BookDetailResponse, ChapterResponse,
@@ -120,28 +118,30 @@ infrastructure/web/api/v1/
 
 ### Key Conventions
 - **Imports**: absolute from project root (`from config.settings import settings`)
-- **Naming**: snake_case, `_impl` suffix for repository implementations, `_` prefix for private helpers
+- **Naming**: snake_case, `_impl` suffix for repository implementations (used as classes), `_` prefix for private helpers
+- **Repositories**: consolidated into single `repositories.py` (not split into `book_repository_impl.py` + `user_repository_impl.py`)
 - **Error handling**: `HTTPException` in routes, `logger.error()` + custom exceptions in services
 - **Response format**: Pydantic models, auto-serialized by FastAPI
 - **Session lifecycle**: `get_session()` async generator → `Depends()` in route handlers
 - **Response builders**: extracted as module-level functions (`_book_from_orm`, `_chapter_to_response`, etc.)
 - **Lazy parsing**: chapters parsed on first access, first chapter parsed immediately on upload
 - **App lifecycle**: `@asynccontextmanager` lifespan hook for startup/shutdown cleanup
+- **Translation singleton**: `app.translation_service` module-level var imported by translation_router
 
 ### Auth Flow
-1. `POST /register` → hash password → save user → return JWT (access + refresh)
-2. `POST /login` → verify password → return JWT
-3. `POST /refresh` → validate refresh token → blacklist old → issue new pair
+1. `POST /api/v1/auth/register` → hash password → save user → return JWT (access + refresh)
+2. `POST /api/v1/auth/login` → verify password → return JWT
+3. `POST /api/v1/auth/refresh` → validate refresh token → blacklist old → issue new pair
 4. Protected routes: `Authorization: Bearer <token>` → `authenticate_request()` → `AuthenticatedUser`
-5. `POST /logout` → blacklist access token via `token_blacklist:{jti}` in Redis
+5. `POST /api/v1/auth/logout` → blacklist access token via `token_blacklist:{jti}` in Redis
 
 ### Book Processing Flow
-1. `POST /books/register` (EPUB/PDF upload) → extract metadata + TOC → save Book + Chapters → parse first chapter → mark "ready"
+1. `POST /api/v1/books/register` (EPUB/PDF upload) → extract metadata + TOC → save Book + Chapters → parse first chapter → mark "ready"
 2. GET chapter → if not parsed, auto-parse from original file → save Paragraphs → mark chapter parsed
-3. `POST /books/{id}/chapters/{cid}/translate` → select paragraph indices → build passage + context → TranslationService → return translation
-4. `POST /books/{id}/translate-text` → arbitrary text selection → TranslationService
-5. `GET /books/{id}/file` → serve original uploaded file
-6. `DELETE /books/{id}` → delete from DB + remove file from disk
+3. `POST /api/v1/books/{id}/chapters/{cid}/translate` → select paragraph indices → build passage + context → TranslationService → return translation
+4. `POST /api/v1/books/{id}/translate-text` → arbitrary text selection → TranslationService
+5. `GET /api/v1/books/{id}/file` → serve original uploaded file
+6. `DELETE /api/v1/books/{id}` → delete from DB + remove file from disk
 
 ### Database Schema (SQLAlchemy ORM)
 - **users**: id, email, hashed_password, created_at, updated_at
@@ -152,7 +152,7 @@ infrastructure/web/api/v1/
 
 ### Docker
 - `backend/Dockerfile`: Python 3.13-slim, installs build deps (gcc, libpq-dev, libxml2, etc.)
-- `docker-compose.yml`: postgres:16 (with volume) + redis:7 + backend (builds from Dockerfile)
+- `backend/docker-compose.yml`: postgres:16 (with volume) + redis:7 + backend (builds from Dockerfile)
 - **Always restart without `-v`** to preserve DB data
 
 ---

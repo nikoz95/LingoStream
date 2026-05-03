@@ -1,23 +1,25 @@
 """Auth routes: register, login, refresh, me, logout."""
 import logging
-from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from config.settings import settings
 from domain.entities.user import User
 from infrastructure.database.postgres.session import get_session
-from infrastructure.database.postgres.user_repository_impl import UserRepositoryImpl
+from infrastructure.database.postgres.repositories import UserRepositoryImpl
 from infrastructure.security.jwt_service import (
     create_access_token,
     create_refresh_token,
     decode_token,
-    get_user_id_from_token,
 )
 from infrastructure.security.password_service import hash_password, verify_password
 from infrastructure.security.token_blacklist import TokenBlacklistService
-from infrastructure.web.api.v1.dependencies import get_current_user
+from infrastructure.web.api.v1.dependencies import (
+    authenticate_request,
+    get_current_user,
+    get_blacklist_service,
+    AuthenticatedUser,
+)
 from infrastructure.web.api.v1.schemas.auth_schemas import (
     RegisterRequest,
     LoginRequest,
@@ -28,7 +30,6 @@ from infrastructure.web.api.v1.schemas.auth_schemas import (
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
-blacklist_service = TokenBlacklistService()
 
 
 def _build_token_response(user: User) -> TokenResponse:
@@ -76,7 +77,11 @@ async def login(request: LoginRequest, db: AsyncSession = Depends(get_session)):
 
 
 @router.post("/refresh", response_model=TokenResponse)
-async def refresh_token(request: RefreshTokenRequest, db: AsyncSession = Depends(get_session)):
+async def refresh_token(
+    request: RefreshTokenRequest,
+    db: AsyncSession = Depends(get_session),
+    blacklist_service: TokenBlacklistService = Depends(get_blacklist_service),
+):
     payload = decode_token(request.refresh_token)
     if payload is None or payload.get("type") != "refresh":
         raise HTTPException(
@@ -84,13 +89,13 @@ async def refresh_token(request: RefreshTokenRequest, db: AsyncSession = Depends
             detail="Invalid or expired refresh token",
         )
     jti = payload.get("jti")
+    exp = payload.get("exp", 0)
     if jti and await blacklist_service.is_blacklisted(jti):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Refresh token has been revoked",
         )
-    # Blacklist the old refresh token
-    exp = payload.get("exp", 0)
+    # Blacklist the old refresh token (prevent replay)
     if jti:
         await blacklist_service.blacklist_token(jti, exp)
 
@@ -117,9 +122,14 @@ async def get_me(current_user: User = Depends(get_current_user)):
 
 
 @router.post("/logout", status_code=status.HTTP_200_OK)
-async def logout(current_user: User = Depends(get_current_user)):
-    """
-    Logout the current user by blacklisting their access token.
-    Note: Requires the token to be passed in the Authorization header.
-    """
+async def logout(
+    auth: AuthenticatedUser = Depends(authenticate_request),
+    blacklist_service: TokenBlacklistService = Depends(get_blacklist_service),
+):
+    """Blacklist the current access token so it can no longer be used."""
+    jti = auth.payload.get("jti")
+    exp = auth.payload.get("exp", 0)
+    if jti:
+        await blacklist_service.blacklist_token(jti, exp)
+        logger.info("Token blacklisted: jti=%s user_id=%d", jti, auth.user.id)
     return {"message": "Successfully logged out"}

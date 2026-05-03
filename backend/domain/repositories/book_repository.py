@@ -1,5 +1,7 @@
+"""Abstract interfaces for Book, Chapter, and Paragraph repositories."""
 from abc import ABC, abstractmethod
-from typing import Optional, List
+from typing import List, Optional
+
 from domain.entities.book import Book, Chapter, Paragraph
 
 
@@ -19,16 +21,16 @@ class BookRepository(ABC):
         ...
 
     @abstractmethod
-    async def update_book_status(self, book_id: int, status: str) -> None:
+    async def delete_book(self, book_id: int) -> Optional[str]:
         ...
 
     @abstractmethod
-    async def delete_book(self, book_id: int) -> Optional[str]:
+    async def update_book_status(self, book_id: int, status: str) -> None:
         ...
 
 
 class ChapterRepository(ABC):
-    """Repository interface for Chapter aggregate."""
+    """Repository interface for Chapter entities."""
 
     @abstractmethod
     async def add_chapters(self, chapters: List[Chapter]) -> List[Chapter]:
@@ -43,12 +45,14 @@ class ChapterRepository(ABC):
         ...
 
     @abstractmethod
-    async def mark_chapter_parsed(self, chapter_id: int, seq_start: int, seq_end: int, count: int) -> None:
+    async def mark_chapter_parsed(
+        self, chapter_id: int, seq_start: int, seq_end: int, count: int
+    ) -> None:
         ...
 
 
 class ParagraphRepository(ABC):
-    """Repository interface for Paragraph aggregate."""
+    """Repository interface for Paragraph entities."""
 
     @abstractmethod
     async def add_paragraphs(self, paragraphs: List[Paragraph]) -> None:
