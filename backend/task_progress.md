@@ -1,15 +1,22 @@
-# Backend Refactoring Plan
+# Backend Refactoring — Complete (20/20)
 
-## Critical Bug Fixes
-1. `dependencies.py` — imports `user_repository_impl` (file doesn't exist), fix to `repositories`
-2. `auth_router.py` — same broken import
-
-## Cleanup & Readability
-3. Clean up unused imports across all files
-4. Improve docstrings and type annotations
-5. Remove dead/redundant code
-6. Consolidate `__init__.py` files
-
-## Verification
-7. Verify no broken imports remain
-8. Update `.clinerules`
+- [x] Read all backend Python files
+- [x] Plan refactoring structure
+- [x] Fix critical bug: dependencies.py broken import
+- [x] Fix critical bug: auth_router.py broken import
+- [x] Clean up & refactor main.py, init_db.py, settings.py for readability
+- [x] Clean up domain layer (entities + repositories)
+- [x] Clean up postgres layer (models, session, repositories, parsers)
+- [x] Clean up translation_service.py
+- [x] Clean up security layer (jwt, password, token_blacklist)
+- [x] Clean up routes (auth, book, translation) + app.py + schemas
+- [x] Verify no broken imports (syntax check passed on all 38 .py files)
+- [x] Update .clinerules
+- [x] Fix runtime bug #1: book_router.py missing `get_session` import + clean duplicates
+- [x] Fix runtime bug #2: docker-compose.yml uses `DB_URL` but settings.py reads `DATABASE_URL`
+- [x] Fix runtime bug #3: Book entity missing `user_id` field
+- [x] Fix runtime bug #4: get_books_by_user doesn't filter by user_id
+- [x] Restart Docker & verify backend starts successfully
+- [x] Run integration test (register + upload book + list books, user isolation verified)
+- [x] Fix bug #5: `/file` endpoint returns 401 because it only checks `Authorization` header but frontend passes token as `?token=` query param
+- [x] Verify `/file?token=...` now returns 200 instead of 401

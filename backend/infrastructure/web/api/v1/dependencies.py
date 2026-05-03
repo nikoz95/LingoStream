@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 from typing import Optional
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -35,16 +35,28 @@ async def authenticate_request(
     credentials: Optional[HTTPAuthorizationCredentials] = Depends(security_scheme),
     db: AsyncSession = Depends(get_session),
     blacklist: TokenBlacklistService = Depends(get_blacklist_service),
+    request: Request = None,
 ) -> AuthenticatedUser:
-    """Dependency that extracts JWT from Authorization header and returns AuthenticatedUser"""
-    if credentials is None:
+    """Extracts JWT from Authorization header (or ?token query param as fallback)
+    and returns AuthenticatedUser.
+
+    The ?token query param fallback is needed for the /file endpoint,
+    which is accessed directly by the browser/PDF viewer via an <a> tag.
+    """
+    token: Optional[str] = None
+
+    if credentials is not None:
+        token = credentials.credentials
+    elif request is not None:
+        # Fallback: extract from ?token= query parameter
+        token = request.query_params.get("token")
+
+    if token is None:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Not authenticated",
             headers={"WWW-Authenticate": "Bearer"},
         )
-
-    token = credentials.credentials
     payload = jwt.decode_token(token)
     if payload is None:
         raise HTTPException(

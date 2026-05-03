@@ -6,6 +6,7 @@ from typing import Optional, List
 @dataclass
 class Book:
     id: Optional[int] = None
+    user_id: int = 0
     title: str = ""
     author: str = ""
     file_path: str = ""

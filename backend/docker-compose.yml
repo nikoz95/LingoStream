@@ -26,7 +26,7 @@ services:
     ports:
       - "8000:8000"
     environment:
-      - DB_URL=postgresql+asyncpg://user:password@db:5432/lingostream
+      - DATABASE_URL=postgresql+asyncpg://user:password@db:5432/lingostream
       - JWT_SECRET=your-secret-key-here
       - REDIS_URL=redis://redis:6379/0
 

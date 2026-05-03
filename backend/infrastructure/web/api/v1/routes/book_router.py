@@ -2,7 +2,6 @@
 import logging
 import uuid
 from pathlib import Path
-from typing import Optional
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 from fastapi.responses import FileResponse
@@ -10,13 +9,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from config.settings import settings
 from domain.entities.book import Book, Chapter, Paragraph
+from domain.entities.user import User
+from infrastructure.database.postgres.epub_parser import EPUBParser
+from infrastructure.database.postgres.pdf_parser import PDFParser
 from infrastructure.database.postgres.repositories import (
     BookRepositoryImpl,
     ChapterRepositoryImpl,
     ParagraphRepositoryImpl,
 )
-from infrastructure.database.postgres.epub_parser import EPUBParser
-from infrastructure.database.postgres.pdf_parser import PDFParser
+from infrastructure.database.postgres.session import get_session
 from infrastructure.web.api.v1.dependencies import get_current_user
 from infrastructure.web.api.v1.schemas.book_schemas import (
     BookDetailResponse,
@@ -26,7 +27,6 @@ from infrastructure.web.api.v1.schemas.book_schemas import (
     ParagraphResponse,
     RegisterBookResponse,
 )
-from domain.entities.user import User
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -149,6 +149,7 @@ async def register_book(
 
     # Persist book
     book = Book(
+        user_id=current_user.id,
         title=meta.get("title", file.filename or "Untitled"),
         author=meta.get("author", "Unknown Author"),
         file_path=file_path,

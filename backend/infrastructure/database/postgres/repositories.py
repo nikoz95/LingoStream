@@ -21,6 +21,7 @@ from infrastructure.database.postgres import models as orm
 def _book_from_orm(b: orm.Book) -> Book:
     return Book(
         id=b.id,
+        user_id=b.user_id,
         title=b.title,
         author=b.author,
         file_path=b.file_path,
@@ -78,6 +79,7 @@ class BookRepositoryImpl(BookRepository):
 
     async def add_book(self, book: Book) -> Book:
         book_orm = orm.Book(
+            user_id=book.user_id,
             title=book.title,
             author=book.author,
             file_path=book.file_path,
@@ -97,7 +99,9 @@ class BookRepositoryImpl(BookRepository):
 
     async def get_books_by_user(self, user_id: int) -> List[Book]:
         result = await self.db.execute(
-            select(orm.Book).order_by(orm.Book.created_at.desc())
+            select(orm.Book)
+            .where(orm.Book.user_id == user_id)
+            .order_by(orm.Book.created_at.desc())
         )
         return [_book_from_orm(b) for b in result.scalars().all()]
 
