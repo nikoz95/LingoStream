@@ -1,0 +1,79 @@
+# ──────────────────────────────────────────────
+# LingoStream — One-click start (production build)
+# ──────────────────────────────────────────────
+# Run:  docker-compose up --build -d
+# Stop: docker-compose down
+#
+# Access: http://localhost          (on this machine)
+#         http://<YOUR_LAN_IP>      (from any device on the local network)
+#
+# Prerequisites:
+#   - Docker Desktop installed
+#   - API keys set in backend/.env
+# ──────────────────────────────────────────────
+
+services:
+  # ── Database ────────────────────────────────
+  db:
+    image: postgres:15
+    environment:
+      POSTGRES_DB: lingostream
+      POSTGRES_USER: user
+      POSTGRES_PASSWORD: password
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U user -d lingostream"]
+      interval: 2s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    restart: unless-stopped
+
+  # ── Redis (token blacklist cache) ───────────
+  redis:
+    image: redis:7
+    ports:
+      - "6379:6379"
+    restart: unless-stopped
+
+  # ── Backend (FastAPI) ──────────────────────
+  backend:
+    build:
+      context: ./backend
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://user:password@db:5432/lingostream
+      - JWT_SECRET=your-secret-key-here
+      - REDIS_URL=redis://redis:6379/0
+      # LLM provider — set via backend/.env
+      - LLM_PROVIDER=openai
+      - LLM_MODEL=gemini-2.5-flash
+      - LLM_BASE_URL=https://generativelanguage.googleapis.com/v1beta/openai/
+    env_file:
+      - ./backend/.env
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    volumes:
+      - ./backend:/app
+    restart: unless-stopped
+
+  # ── Frontend (Nginx, production build) ─────
+  frontend:
+    build:
+      context: ./frontend
+      target: production
+    ports:
+      - "80:80"
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+volumes:
+  postgres_data:

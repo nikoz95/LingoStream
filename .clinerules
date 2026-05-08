@@ -1,14 +1,59 @@
 # Development Instructions
 
-## Docker Restart Protocol
-After every code change to the backend, restart Docker WITHOUT volumes:
+## One-Click Start (Root `docker-compose.yml`)
+
+The project now has a **root `docker-compose.yml`** that bundles all 4 services:
+
+| Service    | Container       | Port  | Description                 |
+|------------|-----------------|-------|-----------------------------|
+| `db`       | PostgreSQL 15   | 5432  | Database                    |
+| `redis`    | Redis 7         | 6379  | Token blacklist cache       |
+| `backend`  | FastAPI (uvicorn) | 8000 | REST API                    |
+| `frontend` | Nginx (production) | **80** | SPA served via Nginx     |
+
+### How to start / stop
+
+| Action    | Double-click      | Or run                  |
+|-----------|-------------------|-------------------------|
+| Start     | `start.bat`       | `docker-compose up --build -d` |
+| Stop      | `stop.bat`        | `docker-compose down`   |
+| View logs | —                 | `docker-compose logs -f`|
+| Status    | —                 | `docker-compose ps`     |
+
+### Access
+
+- **This machine**: `http://localhost`
+- **Other devices on LAN**: `http://<YOUR_LAN_IP>` (e.g. `http://192.168.1.50`)
+
+No port number needed — Nginx serves on port 80.
+
+### How it works
+
+1. **Frontend** is built as production static files (`npm run build`) inside the Docker build step.
+2. **Nginx** serves the static SPA and proxies `/api/*` requests to `http://backend:8000`.
+3. **Backend** uses the same `backend/Dockerfile` as before, with hot-reload via mounted volume in dev mode.
+4. **PostgreSQL** data is preserved in the `postgres_data` Docker volume.
+5. **API keys** are loaded from `backend/.env` via `env_file`.
+
+### Docker Restart Protocol (for code changes)
+
+After every code change to the backend, restart WITHOUT volumes:
 
 ```bash
-docker-compose -f backend/docker-compose.yml down
-docker-compose -f backend/docker-compose.yml up --build -d
+docker-compose down
+docker-compose up --build -d
 ```
 
 **DO NOT** use the `-v` flag with `docker-compose down` (i.e., avoid `docker-compose down -v`), as that would delete the database volume (tables are auto-created at app startup).
+
+If you changed frontend code only (HTML/CSS/JS/TS), run the same command — the frontend Docker build will re-compile.
+
+### Prerequisites
+
+- Docker Desktop (on Windows/macOS) or docker-compose (on Linux)
+- API keys in `backend/.env` (Gemini / DeepSeek)
+- Ports **80**, **5432**, **6379**, **8000** must be free
+  - If port 80 is in use, change `"80:80"` in root `docker-compose.yml` (e.g. `"8080:80"`)
 
 ---
 
