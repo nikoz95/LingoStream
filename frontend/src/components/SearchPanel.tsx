@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useRef } from 'react';
-import type { SearchResult } from '../hooks/usePdfSearch';
+import type { PdfSearchState } from '../hooks/usePdfSearch';
 
 interface SearchPanelProps {
   query: string;
-  searchResult: SearchResult | null;
+  searchState: PdfSearchState | null;
   showSearch: boolean;
   onQueryChange: (q: string) => void;
   onSearch: (q: string) => void;
@@ -14,7 +14,7 @@ interface SearchPanelProps {
 
 export default function SearchPanel({
   query,
-  searchResult,
+  searchState,
   showSearch,
   onQueryChange,
   onSearch,
@@ -39,7 +39,7 @@ export default function SearchPanel({
       if (e.shiftKey) {
         onGoToMatch('prev');
       } else if (query.trim()) {
-        if (searchResult?.totalMatches) {
+        if (searchState && searchState.totalResults > 0) {
           onGoToMatch('next');
         } else {
           onSearch(query);
@@ -49,7 +49,7 @@ export default function SearchPanel({
     if (e.key === 'Escape') {
       onClose();
     }
-  }, [query, searchResult, onSearch, onGoToMatch, onClose]);
+  }, [query, searchState, onSearch, onGoToMatch, onClose]);
 
   // Debounced search on input change
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -59,6 +59,9 @@ export default function SearchPanel({
     if (debounceRef.current) clearTimeout(debounceRef.current);
     if (val.trim()) {
       debounceRef.current = setTimeout(() => onSearch(val), 400);
+    } else {
+      // Clear search when input is empty
+      onSearch('');
     }
   }, [onQueryChange, onSearch]);
 
@@ -68,8 +71,18 @@ export default function SearchPanel({
 
   if (!showSearch) return null;
 
-  const currentMatch = searchResult?.currentMatchIndex ?? -1;
-  const totalMatches = searchResult?.totalMatches ?? 0;
+  const currentMatch = searchState?.currentMatchIndex ?? -1;
+  const totalMatches = searchState?.totalResults ?? 0;
+  const matches = searchState?.matches ?? [];
+
+  // Group matches by page for display
+  const matchesByPage = new Map<number, { pageIndex: number; texts: string[] }>();
+  for (const m of matches) {
+    if (!matchesByPage.has(m.pageIndex)) {
+      matchesByPage.set(m.pageIndex, { pageIndex: m.pageIndex, texts: [] });
+    }
+    matchesByPage.get(m.pageIndex)!.texts.push(m.text);
+  }
 
   return (
     <div className="absolute right-0 top-14 z-50 w-80 lg:w-96 max-h-[calc(100vh-4rem)]
@@ -102,8 +115,18 @@ export default function SearchPanel({
           </button>
         </div>
 
+        {/* Searching indicator */}
+        {searchState?.searching && (
+          <p className="mt-2 text-xs text-white/40 italic">Searching…</p>
+        )}
+
+        {/* Error */}
+        {searchState?.error && (
+          <p className="mt-2 text-xs text-red-400">{searchState.error}</p>
+        )}
+
         {/* Match counter & navigation */}
-        {totalMatches > 0 && (
+        {!searchState?.searching && totalMatches > 0 && (
           <div className="flex items-center justify-between mt-2 text-xs">
             <span className="text-white/50">
               {totalMatches} {totalMatches === 1 ? 'match' : 'matches'}
@@ -135,28 +158,29 @@ export default function SearchPanel({
         )}
 
         {/* No results */}
-        {query.trim() && totalMatches === 0 && (
+        {!searchState?.searching && query.trim() && totalMatches === 0 && (
           <p className="mt-2 text-xs text-white/40">No results found</p>
         )}
       </div>
 
-      {/* Results list */}
+      {/* Results list — grouped by page */}
       <div ref={resultsRef} className="flex-1 overflow-y-auto">
-        {searchResult?.matches.map((match, idx) => (
+        {Array.from(matchesByPage.entries()).map(([pageIdx, group]) => (
           <div
-            key={`${match.pageNumber}-${match.matchIndex}`}
-            onClick={() => handleClickMatch(match.pageNumber)}
+            key={`page-group-${pageIdx}`}
+            onClick={() => handleClickMatch(pageIdx)}
             className={`px-3 py-2.5 cursor-pointer border-b border-white/5 
               transition-colors text-sm
-              ${idx === currentMatch
-                ? 'bg-purple-600/20 border-l-2 border-l-purple-500'
-                : 'hover:bg-white/5'}`}
+              ${matches.some(m => m.pageIndex === pageIdx)
+                ? 'hover:bg-white/5'
+                : ''}`}
           >
             <span className="text-[11px] font-medium text-purple-400 block mb-1">
-              Page {match.pageNumber}
+              Page {pageIdx}
             </span>
-            <span className="text-white/70 text-xs leading-relaxed line-clamp-2">
-              {match.text}
+            <span className="text-white/50 text-xs leading-relaxed line-clamp-2">
+              {group.texts.slice(0, 3).join(' … ')}
+              {group.texts.length > 3 && ' …'}
             </span>
           </div>
         ))}

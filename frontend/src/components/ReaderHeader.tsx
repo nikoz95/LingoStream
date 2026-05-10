@@ -12,6 +12,7 @@ interface ReaderHeaderProps {
   zoomLevel: number;
   viewMode: ViewMode;
   progressPercent: number;
+  isMobile?: boolean;
   onToggleTheme: () => void;
   onToggleSidebar: () => void;
   onBack: () => void;
@@ -31,6 +32,7 @@ export default function ReaderHeader({
   zoomLevel,
   viewMode,
   progressPercent,
+  isMobile,
   onToggleTheme,
   onToggleSidebar,
   onBack,
@@ -67,64 +69,66 @@ export default function ReaderHeader({
   };
 
   return (
-    <header className="flex-shrink-0 glass border-b border-white/10 px-3 h-14 flex flex-col">
+    <header className={`flex-shrink-0 glass border-b border-white/10 flex flex-col ${isMobile ? 'px-2 h-12' : 'px-3 h-14'}`}>
       {/* Main row */}
-      <div className="flex items-center justify-between h-14">
+      <div className={`flex items-center justify-between ${isMobile ? 'h-12' : 'h-14'}`}>
         {/* Left */}
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 min-w-0">
           <button
             onClick={onBack}
-            className="p-2 rounded-xl hover:bg-white/10 transition-colors"
+            className="p-1.5 rounded-xl hover:bg-white/10 transition-colors flex-shrink-0"
             title="Back to Library"
           >
-            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <svg className={`${isMobile ? 'w-4 h-4' : 'w-5 h-5'}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
             </svg>
           </button>
-          <h1 className="font-medium text-sm truncate max-w-[120px] sm:max-w-md">
+          <h1 className={`font-medium truncate ${isMobile ? 'text-xs max-w-[80px]' : 'text-sm max-w-[120px] sm:max-w-md'}`}>
             {title || 'Reading'}
           </h1>
           {numPages && (
-            <span className="text-xs opacity-40 hidden sm:inline">
-              {currentPage} / {numPages}
+            <span className={`opacity-40 flex-shrink-0 ${isMobile ? 'text-[10px]' : 'text-xs hidden sm:inline'}`}>
+              {currentPage}/{numPages}
             </span>
           )}
         </div>
 
         {/* Right */}
-        <div className="flex items-center gap-1.5">
-          {/* Jump to page */}
-          <div className="hidden sm:flex items-center gap-1">
-            <input
-              ref={inputRef}
-              type="number"
-              min={1}
-              max={numPages || 1}
-              value={pageInput}
-              onChange={(e) => setPageInput(e.target.value)}
-              onKeyDown={handlePageKeyDown}
-              placeholder="Page #"
-              className="w-16 px-2 py-1 rounded text-xs bg-white/10 border border-white/20
-                text-white placeholder:text-white/30 focus:outline-none focus:border-purple-500
-                transition-colors [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none
-                [&::-webkit-inner-spin-button]:appearance-none"
-            />
-            <button
-              onClick={handleJump}
-              className="px-2 py-1 text-xs rounded-lg bg-purple-600/50 hover:bg-purple-600/80
-                transition-colors"
-            >
-              Go
-            </button>
-          </div>
+        <div className="flex items-center gap-1">
+          {/* Jump to page — desktop only */}
+          {!isMobile && (
+            <div className="hidden sm:flex items-center gap-1">
+              <input
+                ref={inputRef}
+                type="number"
+                min={1}
+                max={numPages || 1}
+                value={pageInput}
+                onChange={(e) => setPageInput(e.target.value)}
+                onKeyDown={handlePageKeyDown}
+                placeholder="Page #"
+                className="w-16 px-2 py-1 rounded text-xs bg-white/10 border border-white/20
+                  text-white placeholder:text-white/30 focus:outline-none focus:border-purple-500
+                  transition-colors [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none
+                  [&::-webkit-inner-spin-button]:appearance-none"
+              />
+              <button
+                onClick={handleJump}
+                className="px-2 py-1 text-xs rounded-lg bg-purple-600/50 hover:bg-purple-600/80
+                  transition-colors"
+              >
+                Go
+              </button>
+            </div>
+          )}
 
           {/* Search */}
           <button
             onClick={onToggleSearch}
-            className="p-2 rounded-xl hover:bg-white/10 transition-colors"
+            className="p-1.5 rounded-xl hover:bg-white/10 transition-colors"
             title="Search in document (Ctrl+F)"
           >
-            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <svg className={`${isMobile ? 'w-3.5 h-3.5' : 'w-4 h-4'}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
                 d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
             </svg>
@@ -137,85 +141,84 @@ export default function ReaderHeader({
               const idx = (modes.indexOf(viewMode) + 1) % modes.length;
               onViewModeChange(modes[idx]);
             }}
-            className="p-2 rounded-xl hover:bg-white/10 transition-colors"
+            className="p-1.5 rounded-xl hover:bg-white/10 transition-colors"
             title={`View mode: ${viewMode}`}
           >
-            <span className="text-sm font-mono">{viewModeIcons[viewMode]}</span>
+            <span className={`font-mono ${isMobile ? 'text-xs' : 'text-sm'}`}>{viewModeIcons[viewMode]}</span>
           </button>
 
-          {/* Zoom out */}
-          <button
-            onClick={() => onZoomChange(Math.max(0.5, zoomLevel - 0.1))}
-            className="p-2 rounded-xl hover:bg-white/10 transition-colors"
-            title="Zoom out"
-          >
-            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20 12H4" />
-            </svg>
-          </button>
+          {/* Zoom controls — hide on mobile */}
+          {!isMobile && (
+            <>
+              <button
+                onClick={() => onZoomChange(Math.max(0.5, zoomLevel - 0.1))}
+                className="p-1.5 rounded-xl hover:bg-white/10 transition-colors"
+                title="Zoom out"
+              >
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20 12H4" />
+                </svg>
+              </button>
 
-          {/* Zoom label */}
-          <span className="text-xs text-white/50 w-10 text-center tabular-nums">
-            {Math.round(zoomLevel * 100)}%
-          </span>
+              <span className="text-xs text-white/50 w-8 text-center tabular-nums">
+                {Math.round(zoomLevel * 100)}%
+              </span>
 
-          {/* Zoom in */}
-          <button
-            onClick={() => onZoomChange(Math.min(3.0, zoomLevel + 0.1))}
-            className="p-2 rounded-xl hover:bg-white/10 transition-colors"
-            title="Zoom in"
-          >
-            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-            </svg>
-          </button>
+              <button
+                onClick={() => onZoomChange(Math.min(3.0, zoomLevel + 0.1))}
+                className="p-1.5 rounded-xl hover:bg-white/10 transition-colors"
+                title="Zoom in"
+              >
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                </svg>
+              </button>
 
-          {/* Fit buttons */}
-          <button
-            onClick={() => onZoomChange(1)}
-            className="px-2 py-1 text-[10px] rounded-lg hover:bg-white/10 transition-colors hidden sm:block"
-            title="Reset zoom to 100%"
-          >
-            Fit
-          </button>
+              <button
+                onClick={() => onZoomChange(1)}
+                className="px-2 py-1 text-[10px] rounded-lg hover:bg-white/10 transition-colors hidden sm:block"
+                title="Reset zoom to 100%"
+              >
+                Fit
+              </button>
+            </>
+          )}
 
-          {/* Theme */}
-          <button
-            onClick={onToggleTheme}
-            className="p-2 rounded-xl hover:bg-white/10 transition-colors"
-            title="Toggle theme"
-          >
-            {theme === 'sepia' ? (
-              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-                  d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z" />
-              </svg>
-            ) : (
-              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-                  d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z" />
-              </svg>
-            )}
-          </button>
+          {/* Theme — hide on mobile, use system default */}
+          {!isMobile && (
+            <button
+              onClick={onToggleTheme}
+              className="p-1.5 rounded-xl hover:bg-white/10 transition-colors"
+              title="Toggle theme"
+            >
+              {theme === 'sepia' ? (
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                    d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z" />
+                </svg>
+              ) : (
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                    d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z" />
+                </svg>
+              )}
+            </button>
+          )}
 
-          {/* Translation panel toggle */}
-          <button
-            onClick={onToggleSidebar}
-            className={`p-2 rounded-xl transition-colors ${showSidebar ? 'bg-white/15' : 'hover:bg-white/10'}`}
-            title="Toggle translation panel"
-          >
-            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-                d="M3 5h12M3 12h18M3 19h6" />
-            </svg>
-          </button>
-
-          {/* Sign Out */}
+          {/* Sign Out — icon only on mobile */}
           <button
             onClick={onLogout}
-            className="px-3 py-1.5 text-xs rounded-xl border border-white/15 hover:bg-white/10 transition-colors"
+            className={`rounded-xl hover:bg-white/10 transition-colors ${isMobile ? 'p-1.5' : 'px-3 py-1.5 text-xs border border-white/15'}`}
+            title="Sign Out"
           >
-            Sign Out
+            {isMobile ? (
+              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                  d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
+              </svg>
+            ) : (
+              'Sign Out'
+            )}
           </button>
         </div>
       </div>

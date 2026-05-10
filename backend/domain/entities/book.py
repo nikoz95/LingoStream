@@ -11,6 +11,7 @@ class Book:
     author: str = ""
     file_path: str = ""
     total_chapters: int = 0
+    total_pages: int = 0
     language: str = "en"
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
@@ -37,4 +38,23 @@ class Paragraph:
     chapter_id: int = 0
     content: str = ""
     index: int = 0
+    page_index: Optional[int] = None
+    bbox_x0: Optional[float] = None
+    bbox_y0: Optional[float] = None
+    bbox_x1: Optional[float] = None
+    bbox_y1: Optional[float] = None
     phonetic_transcription: Optional[str] = None
+
+
+@dataclass
+class PageImage:
+    """Rendered page image record for server-side rendered PDF pages."""
+    id: Optional[int] = None
+    book_id: int = 0
+    page_index: int = 0
+    image_path: str = ""
+    thumb_path: str = ""
+    width: int = 0
+    height: int = 0
+    dpi: int = 150
+    created_at: Optional[datetime] = None

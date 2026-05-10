@@ -1,17 +1,17 @@
 import { useCallback, useRef, useState, useEffect } from 'react';
-import { Document, Page } from 'react-pdf';
+import type { PDFDocumentProxy } from 'pdfjs-dist';
 
 interface ThumbnailSidebarProps {
-  pdfBlobUrl: string;
-  numPages: number | null;
+  pdf: PDFDocumentProxy | null;
+  totalPages: number;
   currentPage: number;
   onPageClick: (page: number) => void;
   visible: boolean;
 }
 
 export default function ThumbnailSidebar({
-  pdfBlobUrl,
-  numPages,
+  pdf,
+  totalPages,
   currentPage,
   onPageClick,
   visible,
@@ -59,37 +59,76 @@ export default function ThumbnailSidebar({
           ${'bg-gray-900/80 backdrop-blur-md'}`}
       >
         <div className="p-2 space-y-2">
-          <Document file={pdfBlobUrl}>
-            {Array.from(new Array(numPages || 0), (_, i) => {
-              const pageNum = i + 1;
-              const isCurrent = pageNum === currentPage;
-              return (
-                <div
-                  key={`thumb_${pageNum}`}
-                  data-thumb-page={pageNum}
-                  onClick={() => onPageClick(pageNum)}
-                  className={`cursor-pointer rounded-lg overflow-hidden 
-                    transition-all duration-150 border-2 
-                    ${isCurrent
-                      ? 'border-purple-500 shadow-lg shadow-purple-500/30'
-                      : 'border-transparent hover:border-white/20'}`}
-                >
-                  <Page
-                    pageNumber={pageNum}
-                    width={80}
-                    renderTextLayer={false}
-                    renderAnnotationLayer={false}
-                    className="bg-white"
-                  />
-                  <div className="text-center text-[10px] py-0.5 bg-black/40 text-white/70">
-                    {pageNum}
-                  </div>
+          {Array.from(new Array(totalPages), (_, i) => {
+            const pageNum = i + 1;
+            const isCurrent = pageNum === currentPage;
+            return (
+              <div
+                key={`thumb_${pageNum}`}
+                data-thumb-page={pageNum}
+                onClick={() => onPageClick(pageNum)}
+                className={`cursor-pointer rounded-lg overflow-hidden 
+                  transition-all duration-150 border-2 
+                  ${isCurrent
+                    ? 'border-purple-500 shadow-lg shadow-purple-500/30'
+                    : 'border-transparent hover:border-white/20'}`}
+              >
+                {/* Use react-pdf Thumbnail component for client-side rendering */}
+                {pdf ? (
+                  <ThumbnailItem pdf={pdf} pageNumber={pageNum} />
+                ) : (
+                  <div className="w-full h-24 bg-gray-800 animate-pulse" />
+                )}
+                <div className="text-center text-[10px] py-0.5 bg-black/40 text-white/70">
+                  {pageNum}
                 </div>
-              );
-            })}
-          </Document>
+              </div>
+            );
+          })}
         </div>
       </div>
     </>
+  );
+}
+
+/** Internal component to render a single thumbnail using react-pdf */
+function ThumbnailItem({ pdf, pageNumber }: { pdf: PDFDocumentProxy; pageNumber: number }) {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const [loaded, setLoaded] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    const renderThumb = async () => {
+      if (!canvasRef.current) return;
+      try {
+        const page = await pdf.getPage(pageNumber);
+        const viewport = page.getViewport({ scale: 0.3 }); // small thumbnail
+        const canvas = canvasRef.current;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) return;
+
+        canvas.width = viewport.width;
+        canvas.height = viewport.height;
+
+        await page.render({ canvasContext: ctx, viewport }).promise;
+        if (!cancelled) setLoaded(true);
+      } catch (err) {
+        console.error('Thumbnail render error:', err);
+      }
+    };
+    renderThumb();
+    return () => { cancelled = true; };
+  }, [pdf, pageNumber]);
+
+  if (!loaded) {
+    return <div className="w-full bg-gray-800 animate-pulse" style={{ minHeight: 100 }} />;
+  }
+
+  return (
+    <canvas
+      ref={canvasRef}
+      className="w-full"
+      style={{ display: 'block' }}
+    />
   );
 }

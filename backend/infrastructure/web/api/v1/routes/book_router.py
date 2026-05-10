@@ -83,19 +83,40 @@ async def _ensure_chapter_parsed(
         return chapter
 
     parser = _get_parser(book_file_path)
+    ext = Path(book_file_path).suffix.lower()
     try:
-        blocks = parser.parse_chapter(book_file_path, chapter.spine_index)
-        paragraphs = [
-            Paragraph(book_id=chapter.book_id, chapter_id=chapter.id,
-                      content=content, index=idx)
-            for idx, content in blocks
-        ]
+        # For PDFs, use parse_page_with_positions to get bbox coords + page_index
+        if ext == ".pdf":
+            blocks = parser.parse_page_with_positions(
+                book_file_path,
+                spine_index=chapter.spine_index,
+                page_index=chapter.spine_index,
+            )
+            paragraphs = [
+                Paragraph(
+                    book_id=chapter.book_id, chapter_id=chapter.id,
+                    content=content, index=idx,
+                    page_index=chapter.spine_index,
+                    bbox_x0=x0, bbox_y0=y0, bbox_x1=x1, bbox_y1=y1,
+                )
+                for idx, content, x0, y0, x1, y1 in blocks
+            ]
+        else:
+            blocks = parser.parse_chapter(book_file_path, chapter.spine_index)
+            paragraphs = [
+                Paragraph(book_id=chapter.book_id, chapter_id=chapter.id,
+                          content=content, index=idx)
+                for idx, content in blocks
+            ]
+
         para_repo = ParagraphRepositoryImpl(db)
         await para_repo.add_paragraphs(paragraphs)
 
         chapter_repo = ChapterRepositoryImpl(db)
-        await chapter_repo.mark_chapter_parsed(chapter.id, 0, len(blocks) - 1, len(blocks))
-        logger.info("Parsed %d paragraphs for chapter %d", len(blocks), chapter.id)
+        await chapter_repo.mark_chapter_parsed(
+            chapter.id, 0, len(paragraphs) - 1, len(paragraphs)
+        )
+        logger.info("Parsed %d paragraphs for chapter %d", len(paragraphs), chapter.id)
 
         updated = await chapter_repo.get_chapter_by_id(chapter.id)
         return updated or chapter

@@ -8,7 +8,7 @@ from typing import Optional, List
 from sqlalchemy import select, update, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from domain.entities.book import Book, Chapter, Paragraph
+from domain.entities.book import Book, Chapter, PageImage, Paragraph
 from domain.entities.user import User
 from domain.repositories.book_repository import (
     BookRepository,
@@ -57,7 +57,26 @@ def _paragraph_from_orm(p: orm.Paragraph) -> Paragraph:
         chapter_id=p.chapter_id,
         content=p.content,
         index=p.index,
+        page_index=p.page_index,
+        bbox_x0=p.bbox_x0,
+        bbox_y0=p.bbox_y0,
+        bbox_x1=p.bbox_x1,
+        bbox_y1=p.bbox_y1,
         phonetic_transcription=p.phonetic_transcription,
+    )
+
+
+def _page_image_from_orm(pi: orm.PageImage) -> PageImage:
+    return PageImage(
+        id=pi.id,
+        book_id=pi.book_id,
+        page_index=pi.page_index,
+        image_path=pi.image_path,
+        thumb_path=pi.thumb_path,
+        width=pi.width,
+        height=pi.height,
+        dpi=pi.dpi,
+        created_at=pi.created_at,
     )
 
 
@@ -140,11 +159,13 @@ class BookRepositoryImpl(BaseRepositoryImpl, BookRepository):
         await self.db.execute(delete(orm.Paragraph).where(orm.Paragraph.book_id == book_id))
         # 3. Delete chapters
         await self.db.execute(delete(orm.Chapter).where(orm.Chapter.book_id == book_id))
-        # 4. Nullify vocabulary word book references
+        # 4. Delete page images
+        await self.db.execute(delete(orm.PageImage).where(orm.PageImage.book_id == book_id))
+        # 5. Nullify vocabulary word book references
         await self.db.execute(
             update(orm.VocabularyWord).where(orm.VocabularyWord.book_id == book_id).values(book_id=None)
         )
-        # 5. Delete the book itself
+        # 6. Delete the book itself
         await self.db.execute(delete(orm.Book).where(orm.Book.id == book_id))
         await self.db.commit()
         return file_path
@@ -217,6 +238,11 @@ class ParagraphRepositoryImpl(BaseRepositoryImpl, ParagraphRepository):
                     chapter_id=p.chapter_id,
                     content=p.content,
                     index=p.index,
+                    page_index=p.page_index,
+                    bbox_x0=p.bbox_x0,
+                    bbox_y0=p.bbox_y0,
+                    bbox_x1=p.bbox_x1,
+                    bbox_y1=p.bbox_y1,
                 )
             )
         await self.db.commit()
@@ -228,6 +254,48 @@ class ParagraphRepositoryImpl(BaseRepositoryImpl, ParagraphRepository):
             .order_by(orm.Paragraph.index)
         )
         return [_paragraph_from_orm(p) for p in result.scalars().all()]
+
+    async def get_paragraphs_by_page(self, book_id: int, page_index: int) -> List[Paragraph]:
+        """Get all paragraphs for a specific page index across any chapter."""
+        result = await self.db.execute(
+            select(orm.Paragraph)
+            .where(orm.Paragraph.book_id == book_id)
+            .where(orm.Paragraph.page_index == page_index)
+            .order_by(orm.Paragraph.index)
+        )
+        return [_paragraph_from_orm(p) for p in result.scalars().all()]
+
+    async def search_paragraphs(
+        self, book_id: int, query: str
+    ) -> List[dict]:
+        """
+        Full-text search across paragraphs for a book.
+
+        Returns list of { paragraph_id, book_id, chapter_id, page_index,
+                          content, index, bbox_x0, bbox_y0, bbox_x1, bbox_y1 }
+        ordered by page_index, then paragraph index.
+        """
+        result = await self.db.execute(
+            select(orm.Paragraph)
+            .where(orm.Paragraph.book_id == book_id)
+            .where(orm.Paragraph.content.ilike(f"%{query}%"))
+            .order_by(orm.Paragraph.page_index, orm.Paragraph.index)
+        )
+        return [
+            {
+                "paragraph_id": p.id,
+                "book_id": p.book_id,
+                "chapter_id": p.chapter_id,
+                "page_index": p.page_index,
+                "content": p.content,
+                "index": p.index,
+                "bbox_x0": p.bbox_x0,
+                "bbox_y0": p.bbox_y0,
+                "bbox_x1": p.bbox_x1,
+                "bbox_y1": p.bbox_y1,
+            }
+            for p in result.scalars().all()
+        ]
 
 
 # ── User ──────────────────────────────────────────────────────────────────
@@ -343,3 +411,73 @@ class VocabularyRepositoryImpl(BaseRepositoryImpl):
         )
         await self.db.commit()
         return True
+
+
+# ── PageImage ────────────────────────────────────────────────────────────
+
+
+class PageImageRepositoryImpl(BaseRepositoryImpl):
+    """Repository for cached page images of PDF books."""
+
+    async def add(self, page_image: PageImage) -> PageImage:
+        pi_orm = orm.PageImage(
+            book_id=page_image.book_id,
+            page_index=page_image.page_index,
+            image_path=page_image.image_path,
+            thumb_path=page_image.thumb_path,
+            width=page_image.width,
+            height=page_image.height,
+            dpi=page_image.dpi,
+        )
+        self.db.add(pi_orm)
+        await self.db.commit()
+        await self.db.refresh(pi_orm)
+        return _page_image_from_orm(pi_orm)
+
+    async def add_all(self, page_images: List[PageImage]) -> None:
+        """Batch-insert multiple page images."""
+        for pi in page_images:
+            self.db.add(
+                orm.PageImage(
+                    book_id=pi.book_id,
+                    page_index=pi.page_index,
+                    image_path=pi.image_path,
+                    thumb_path=pi.thumb_path,
+                    width=pi.width,
+                    height=pi.height,
+                    dpi=pi.dpi,
+                )
+            )
+        await self.db.commit()
+
+    async def get_by_book_and_page(
+        self, book_id: int, page_index: int
+    ) -> Optional[PageImage]:
+        result = await self.db.execute(
+            select(orm.PageImage)
+            .where(orm.PageImage.book_id == book_id)
+            .where(orm.PageImage.page_index == page_index)
+        )
+        pi_orm = result.scalar_one_or_none()
+        return _page_image_from_orm(pi_orm) if pi_orm else None
+
+    async def get_all_by_book(self, book_id: int) -> List[PageImage]:
+        result = await self.db.execute(
+            select(orm.PageImage)
+            .where(orm.PageImage.book_id == book_id)
+            .order_by(orm.PageImage.page_index)
+        )
+        return [_page_image_from_orm(pi) for pi in result.scalars().all()]
+
+    async def delete_by_book(self, book_id: int) -> None:
+        await self.db.execute(
+            delete(orm.PageImage).where(orm.PageImage.book_id == book_id)
+        )
+        await self.db.commit()
+
+    async def get_page_count(self, book_id: int) -> int:
+        result = await self.db.execute(
+            select(orm.PageImage)
+            .where(orm.PageImage.book_id == book_id)
+        )
+        return len(result.scalars().all())

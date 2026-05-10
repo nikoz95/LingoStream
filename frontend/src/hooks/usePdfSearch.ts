@@ -1,129 +1,142 @@
+/**
+ * Hook: Client-side PDF text search using pdfjs-dist textContent.
+ * Replaces the old backend-based search.
+ */
 import { useState, useCallback, useRef } from 'react';
 import type { PDFDocumentProxy } from 'pdfjs-dist';
 
 export interface SearchMatch {
-  pageIndex: number;       // 0-based
-  pageNumber: number;      // 1-based
+  pageIndex: number; // 1-based
   text: string;
-  matchIndex: number;      // index within page's text content
+  // We'll store the match index on the page for highlighting
 }
 
-export interface SearchResult {
+export interface PdfSearchState {
+  query: string;
   matches: SearchMatch[];
+  totalResults: number;
   currentMatchIndex: number;
-  totalMatches: number;
+  searching: boolean;
+  error: string | null;
 }
 
-export function usePdfSearch(pdfDoc: PDFDocumentProxy | null) {
-  const [query, setQuery] = useState('');
-  const [searchResult, setSearchResult] = useState<SearchResult | null>(null);
-  const [showSearch, setShowSearch] = useState(false);
-  const pageTextCache = useRef<Map<number, string>>(new Map());
+export function usePdfSearch(pdfDocument: PDFDocumentProxy | null) {
+  const [state, setState] = useState<PdfSearchState>({
+    query: '',
+    matches: [],
+    totalResults: 0,
+    currentMatchIndex: 0,
+    searching: false,
+    error: null,
+  });
 
-  const clearSearch = useCallback(() => {
-    setQuery('');
-    setSearchResult(null);
-    setShowSearch(false);
-    pageTextCache.current.clear();
-  }, []);
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const runSearch = useCallback(async (searchQuery: string) => {
-    if (!pdfDoc || !searchQuery.trim()) {
-      setSearchResult(null);
+  const search = useCallback(async (q: string) => {
+    const trimmed = q.trim();
+    if (!trimmed) {
+      setState({
+        query: '',
+        matches: [],
+        totalResults: 0,
+        currentMatchIndex: 0,
+        searching: false,
+        error: null,
+      });
       return;
     }
 
-    const q = searchQuery.toLowerCase();
-    const matches: SearchMatch[] = [];
-    const totalPages = pdfDoc.numPages;
+    if (!pdfDocument) return;
 
-    for (let i = 1; i <= totalPages; i++) {
-      let pageText = pageTextCache.current.get(i);
-      if (!pageText) {
-        try {
-          const page = await pdfDoc.getPage(i);
-          const content = await page.getTextContent();
-          pageText = content.items.map((item: any) => item.str).join(' ');
-          pageTextCache.current.set(i, pageText);
-        } catch {
-          continue;
+    setState(prev => ({ ...prev, query: trimmed, searching: true, error: null }));
+
+    try {
+      const allMatches: SearchMatch[] = [];
+      const numPages = pdfDocument.numPages;
+
+      for (let pageNum = 1; pageNum <= numPages; pageNum++) {
+        const page = await pdfDocument.getPage(pageNum);
+        const textContent = await page.getTextContent();
+        const fullText = textContent.items.map((item: any) => item.str).join(' ');
+
+        // Simple case-insensitive search
+        const lowerQuery = trimmed.toLowerCase();
+        const lowerText = fullText.toLowerCase();
+        let idx = 0;
+        while ((idx = lowerText.indexOf(lowerQuery, idx)) !== -1) {
+          allMatches.push({
+            pageIndex: pageNum,
+            text: fullText.substring(idx, idx + trimmed.length),
+          });
+          idx += 1;
         }
       }
 
-      // Find all occurrences in this page
-      let idx = 0;
-      let matchIdx = 0;
-      const lowerPageText = pageText.toLowerCase();
-      let pos = lowerPageText.indexOf(q, idx);
-      while (pos !== -1) {
-        const start = Math.max(0, pos - 20);
-        const end = Math.min(pageText.length, pos + q.length + 40);
-        const contextText = (pos > 0 ? '…' : '') +
-          pageText.slice(start, end) +
-          (end < pageText.length ? '…' : '');
-
-        matches.push({
-          pageIndex: i - 1,
-          pageNumber: i,
-          text: contextText,
-          matchIndex: matchIdx++,
-        });
-        pos = lowerPageText.indexOf(q, pos + 1);
-      }
+      setState({
+        query: trimmed,
+        matches: allMatches,
+        totalResults: allMatches.length,
+        currentMatchIndex: 0,
+        searching: false,
+        error: null,
+      });
+    } catch (err) {
+      setState(prev => ({
+        ...prev,
+        searching: false,
+        error: err instanceof Error ? err.message : 'Search failed',
+      }));
     }
+  }, [pdfDocument]);
 
-    setQuery(searchQuery);
-    setSearchResult({
-      matches,
-      currentMatchIndex: matches.length > 0 ? 0 : -1,
-      totalMatches: matches.length,
-    });
-  }, [pdfDoc]);
-
-  const goToMatch = useCallback((direction: 'next' | 'prev') => {
-    if (!searchResult || searchResult.totalMatches === 0) return searchResult;
-
-    let newIndex = searchResult.currentMatchIndex;
-    if (direction === 'next') {
-      newIndex = (newIndex + 1) % searchResult.totalMatches;
-    } else {
-      newIndex = (newIndex - 1 + searchResult.totalMatches) % searchResult.totalMatches;
+  const debouncedSearch = useCallback((q: string) => {
+    if (debounceRef.current) {
+      clearTimeout(debounceRef.current);
     }
+    debounceRef.current = setTimeout(() => {
+      search(q);
+    }, 400);
+  }, [search]);
 
-    const newResult = { ...searchResult, currentMatchIndex: newIndex };
-    setSearchResult(newResult);
-    return newResult;
-  }, [searchResult]);
-
-  const setCurrentMatchByPage = useCallback((page: number) => {
-    if (!searchResult || searchResult.totalMatches === 0) return;
-    const idx = searchResult.matches.findIndex(m => m.pageNumber === page);
-    if (idx !== -1) {
-      const newResult = { ...searchResult, currentMatchIndex: idx };
-      setSearchResult(newResult);
-    }
-  }, [searchResult]);
-
-  const toggleSearch = useCallback(() => {
-    setShowSearch(prev => {
-      if (prev) {
-        setQuery('');
-        setSearchResult(null);
-      }
-      return !prev;
+  const nextMatch = useCallback(() => {
+    setState(prev => {
+      if (prev.totalResults === 0) return prev;
+      const next = (prev.currentMatchIndex + 1) % prev.totalResults;
+      return { ...prev, currentMatchIndex: next };
     });
   }, []);
 
+  const prevMatch = useCallback(() => {
+    setState(prev => {
+      if (prev.totalResults === 0) return prev;
+      const prevIdx = (prev.currentMatchIndex - 1 + prev.totalResults) % prev.totalResults;
+      return { ...prev, currentMatchIndex: prevIdx };
+    });
+  }, []);
+
+  const clearSearch = useCallback(() => {
+    if (debounceRef.current) {
+      clearTimeout(debounceRef.current);
+    }
+    setState({
+      query: '',
+      matches: [],
+      totalResults: 0,
+      currentMatchIndex: 0,
+      searching: false,
+      error: null,
+    });
+  }, []);
+
+  const currentMatch = state.matches[state.currentMatchIndex] || null;
+
   return {
-    query,
-    searchResult,
-    showSearch,
-    setQuery,
-    runSearch,
-    goToMatch,
-    setCurrentMatchByPage,
+    ...state,
+    currentMatch,
+    search,
+    debouncedSearch,
+    nextMatch,
+    prevMatch,
     clearSearch,
-    toggleSearch,
-    setShowSearch,
   };
 }

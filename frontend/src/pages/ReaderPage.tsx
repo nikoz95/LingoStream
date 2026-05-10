@@ -1,15 +1,8 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useAuth } from '../lib/auth';
-import { pdfjs, Document, Page } from 'react-pdf';
-import type { PDFDocumentProxy } from 'pdfjs-dist';
-import 'react-pdf/dist/esm/Page/TextLayer.css';
-import 'react-pdf/dist/esm/Page/AnnotationLayer.css';
-import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
-pdfjs.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
-
-import { getBookFileUrl, saveVocabularyWord } from '../lib/api';
-import { usePdfLoader } from '../hooks/usePdfLoader';
+import { saveVocabularyWord } from '../lib/api';
+import { usePdfDocument } from '../hooks/usePdfDocument';
 import { useContainerWidth } from '../hooks/useContainerWidth';
 import { useTextSelection } from '../hooks/useTextSelection';
 import { useTranslation } from '../hooks/useTranslation';
@@ -21,6 +14,7 @@ import LoadingSpinner from '../components/LoadingSpinner';
 import TranslationPanel from '../components/TranslationPanel';
 import ThumbnailSidebar from '../components/ThumbnailSidebar';
 import SearchPanel from '../components/SearchPanel';
+import PageRenderer from '../components/PageRenderer';
 
 const PAGE_GAP = 24;
 const MIN_ZOOM = 0.5;
@@ -31,15 +25,29 @@ export default function ReaderPage() {
   const { bookId } = useParams<{ bookId: string }>();
   const navigate = useNavigate();
   const { logout } = useAuth();
-  const { book, loading, error, pdfBlobUrl } = usePdfLoader(bookId);
+
+  // ── PDF Document ──
+  const {
+    book: pdfBook,
+    loading: pdfLoading,
+    error: pdfError,
+    numPages,
+    documentRef: pdfDocument,
+    onLoadSuccess,
+    onLoadError,
+  } = usePdfDocument(bookId);
+
   const {
     selectedText,
     selectionRect,
     isWordClick,
+    isLongPress,
     leftContext,
     rightContext,
     clearSelection,
+    resetLongPress,
   } = useTextSelection();
+
   const {
     translating,
     translationResult,
@@ -54,25 +62,45 @@ export default function ReaderPage() {
     savedVocabularyId,
     onVocabularySaved,
     onVocabularyUpdated,
-  } = useTranslation(book, bookId);
+  } = useTranslation(null, bookId);
+
   const [savedToVocabulary, setSavedToVocabulary] = useState(false);
   const [translateIconPos, setTranslateIconPos] = useState<{ top: number; left: number } | null>(null);
 
-  // ---- Core state ----
-  const [numPages, setNumPages] = useState<number | null>(null);
+  // ── Mobile detection ──
+  const [isMobile, setIsMobile] = useState(() => window.innerWidth < 768);
+  const [showMobileTranslation, setShowMobileTranslation] = useState(false);
+
+  useEffect(() => {
+    const check = () => setIsMobile(window.innerWidth < 768);
+    window.addEventListener('resize', check);
+    return () => window.removeEventListener('resize', check);
+  }, []);
+
+  // Auto-show mobile translation panel when result comes in
+  useEffect(() => {
+    if (isMobile && (translationResult || wordResult)) {
+      setShowMobileTranslation(true);
+    }
+  }, [isMobile, translationResult, wordResult]);
+
+  // ── Core state ──
   const [currentPage, setCurrentPage] = useState(1);
   const [theme, setTheme] = useState<'sepia' | 'night'>('night');
-  const [showSidebar, setShowSidebar] = useState(true);
-  const [zoomLevel, setZoomLevel] = useState(1.0);
+  const [showSidebar, setShowSidebar] = useState(!isMobile);
+  const [zoomLevel, setZoomLevel] = useState(isMobile ? 0.7 : 1.0);
   const [viewMode, setViewMode] = useState<ViewMode>('scroll');
+
+  const effectiveSidebarVisible = isMobile ? false : showSidebar;
+
   const { ref: containerWidthRef, width: containerWidth } = useContainerWidth();
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const pageElementsRef = useRef<Map<number, HTMLDivElement>>(new Map());
   const spreadContainerRef = useRef<HTMLDivElement>(null);
-  const pdfDocRef = useRef<PDFDocumentProxy | null>(null);
+  const pageNumberRefs = useRef<Map<number, HTMLDivElement>>(new Map());
   const isScrollingRef = useRef(false);
 
-  // ---- Dark mode detection ----
+  // ── Dark mode detection ──
   useEffect(() => {
     const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
     setTheme(prefersDark ? 'night' : 'sepia');
@@ -81,52 +109,60 @@ export default function ReaderPage() {
     return () => window.matchMedia('(prefers-color-scheme: dark)').removeEventListener('change', listener);
   }, []);
 
-  // ---- Reading progress hook ----
+  // ── Reading progress ──
   const {
     containerRef: progressContainerRef,
     saveProgress,
     scrollToSaved,
-    progressRef,
   } = useReadingProgress(bookId, numPages);
 
-  // ---- PDF search hook ----
+  // ── Client-side PDF search ──
   const {
     query,
-    searchResult,
-    showSearch,
-    setQuery,
-    runSearch,
-    goToMatch,
-    setCurrentMatchByPage,
+    matches,
+    totalResults,
+    currentMatchIndex,
+    searching,
+    error: searchError,
+    currentMatch,
+    debouncedSearch,
+    nextMatch,
+    prevMatch,
     clearSearch,
-    toggleSearch,
-    setShowSearch,
-  } = usePdfSearch(pdfDocRef.current);
+  } = usePdfSearch(pdfDocument);
 
-  // ---- PDF loaded ----
-  const onDocumentLoadSuccess = useCallback(
-    (pdf: PDFDocumentProxy) => {
-      setNumPages(pdf.numPages);
-      pdfDocRef.current = pdf;
-    },
-    [],
-  );
+  const [showSearch, setShowSearch] = useState(false);
+
+  const toggleSearch = useCallback(() => {
+    setShowSearch(prev => !prev);
+  }, []);
+
+  const runSearch = useCallback((q: string) => {
+    debouncedSearch(q);
+  }, [debouncedSearch]);
+
+  const goToMatch = useCallback((direction: 'next' | 'prev') => {
+    if (direction === 'next') nextMatch();
+    else prevMatch();
+  }, [nextMatch, prevMatch]);
+
+  const setQuery = useCallback((q: string) => {
+    debouncedSearch(q);
+  }, [debouncedSearch]);
 
   // Restore progress after PDF loads
   useEffect(() => {
-    if (numPages && numPages > 0 && !loading) {
+    if (numPages && numPages > 0 && !pdfLoading) {
       scrollToSaved();
     }
-  }, [numPages, loading, scrollToSaved]);
+  }, [numPages, pdfLoading, scrollToSaved]);
 
-  // ---- Page tracking via IntersectionObserver ----
+  // ── Page tracking via IntersectionObserver ──
   useEffect(() => {
     if (!numPages || !scrollContainerRef.current) return;
-    const container = scrollContainerRef.current;
 
     const observer = new IntersectionObserver(
       (entries) => {
-        // Only track if user isn't actively scrolling via keyboard nav
         if (isScrollingRef.current) return;
 
         let mostVisible = 0;
@@ -142,7 +178,6 @@ export default function ReaderPage() {
 
         if (mostVisible > 0) {
           setCurrentPage(mostVisible);
-          // Save progress on page change
           const percent = (mostVisible / numPages) * 100;
           saveProgress(mostVisible, percent);
         }
@@ -150,7 +185,7 @@ export default function ReaderPage() {
       { threshold: [0.1, 0.3, 0.6], rootMargin: '-50px 0px' },
     );
 
-    const map = pageElementsRef.current;
+    const map = pageNumberRefs.current;
     map.forEach((el) => observer.observe(el));
 
     return () => {
@@ -158,36 +193,30 @@ export default function ReaderPage() {
     };
   }, [numPages, saveProgress]);
 
-  // ---- Scroll handler for progress (fallback when no page elements observed) ----
-  const handleScroll = useCallback(() => {
-    if (!scrollContainerRef.current || !numPages) return;
-    isScrollingRef.current = false;
-
-    const { scrollTop, scrollHeight, clientHeight } = scrollContainerRef.current;
-    const scrollPercent = (scrollTop / (scrollHeight - clientHeight)) * 100;
-    if (scrollPercent >= 0 && scrollPercent <= 100) {
-      saveProgress(currentPage, scrollPercent);
+  // Observe page refs as they mount
+  const observePageRef = useCallback((pageNum: number) => (el: HTMLDivElement | null) => {
+    if (el) {
+      pageNumberRefs.current.set(pageNum, el);
+    } else {
+      pageNumberRefs.current.delete(pageNum);
     }
-  }, [numPages, currentPage, saveProgress]);
+  }, []);
 
-  // ---- Keyboard shortcuts ----
+  // ── Keyboard shortcuts ──
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      // Ctrl+F → search
       if ((e.ctrlKey || e.metaKey) && e.key === 'f') {
         e.preventDefault();
         toggleSearch();
         return;
       }
 
-      // Escape → close search
       if (e.key === 'Escape' && showSearch) {
         e.preventDefault();
         setShowSearch(false);
         return;
       }
 
-      // Don't intercept if typing in an input
       if ((e.target as HTMLElement)?.tagName === 'INPUT' || (e.target as HTMLElement)?.tagName === 'TEXTAREA') return;
 
       switch (e.key) {
@@ -218,15 +247,14 @@ export default function ReaderPage() {
 
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [currentPage, numPages, showSearch, toggleSearch, setShowSearch]);
+  }, [currentPage, numPages, showSearch, toggleSearch]);
 
-  // ---- Scroll to page helper ----
+  // ── Scroll to page helper ──
   const scrollToPage = useCallback((page: number) => {
     if (!numPages) return;
     const clamped = Math.max(1, Math.min(page, numPages));
     setCurrentPage(clamped);
 
-    // In spread mode, scroll the spread container into view
     if (viewMode === 'spread' && spreadContainerRef.current) {
       const pairIndex = Math.floor((clamped - 1) / 2);
       const spreadEl = spreadContainerRef.current;
@@ -234,7 +262,6 @@ export default function ReaderPage() {
       for (let i = 0; i < spreadChildren.length; i++) {
         const child = spreadChildren[i] as HTMLElement;
         if (child.dataset && child.dataset.pairIndex === String(pairIndex)) {
-          // Wait for DOM update then scroll
           requestAnimationFrame(() => {
             child.scrollIntoView({ behavior: 'smooth', block: 'start' });
           });
@@ -243,14 +270,13 @@ export default function ReaderPage() {
       }
     }
 
-    // Default: scroll page element into view
-    const el = pageElementsRef.current.get(clamped);
+    const el = pageNumberRefs.current.get(clamped);
     if (el) {
       el.scrollIntoView({ behavior: 'smooth', block: 'start' });
     }
   }, [numPages, viewMode]);
 
-  // ---- Zoom with Ctrl+Wheel ----
+  // ── Zoom with Ctrl+Wheel ──
   const handleWheel = useCallback((e: React.WheelEvent) => {
     if (!e.ctrlKey && !e.metaKey) return;
     e.preventDefault();
@@ -261,7 +287,7 @@ export default function ReaderPage() {
     });
   }, []);
 
-  // ---- Auto-clear translation panel on new selection ----
+  // ── Auto-clear translation panel on new selection ──
   useEffect(() => {
     if (selectedText) {
       closeTranslation();
@@ -269,10 +295,9 @@ export default function ReaderPage() {
     }
   }, [selectedText]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // ---- Floating translate icon position ----
+  // ── Floating translate icon position ──
   useEffect(() => {
     if (selectionRect && selectedText) {
-      // Position icon above the selected text
       const scrollY = window.scrollY || window.pageYOffset;
       setTranslateIconPos({
         top: selectionRect.top + scrollY - 48,
@@ -283,7 +308,17 @@ export default function ReaderPage() {
     }
   }, [selectionRect, selectedText]);
 
-  // ---- Callbacks ----
+  // ── Auto-translate on long-press (mobile touch) ──
+  useEffect(() => {
+    if (isLongPress && selectedText) {
+      translate(selectedText, true, leftContext, rightContext);
+      setTranslateIconPos(null);
+      setShowMobileTranslation(true);
+      resetLongPress();
+    }
+  }, [isLongPress]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── Callbacks ──
   const handleTranslate = useCallback(() => {
     translate(selectedText, isWordClick, leftContext, rightContext);
     setTranslateIconPos(null);
@@ -293,6 +328,7 @@ export default function ReaderPage() {
     closeTranslation();
     clearSelection();
     setSavedToVocabulary(false);
+    setShowMobileTranslation(false);
   }, [closeTranslation, clearSelection]);
 
   const handleSaveToVocabulary = useCallback(async () => {
@@ -308,7 +344,6 @@ export default function ReaderPage() {
         translation: wordResult.translation,
       });
       setSavedToVocabulary(true);
-      // Notify hook so it can update existingWord / savedVocabularyId
       onVocabularySaved(saved.id);
     } catch {
       // silently fail
@@ -331,96 +366,24 @@ export default function ReaderPage() {
 
   const handleNavToPage = useCallback((page: number) => {
     scrollToPage(page);
-    // Also update search match index if search is active
-    if (searchResult && searchResult.totalMatches > 0) {
-      setCurrentMatchByPage(page);
-    }
-  }, [scrollToPage, searchResult, setCurrentMatchByPage]);
+  }, [scrollToPage]);
 
-  // ---- Clear search highlights when search closes ----
+  // ── Clear search highlights when search closes ──
   const handleCloseSearch = useCallback(() => {
     setShowSearch(false);
     clearSearch();
-    // Remove all highlights
     document.querySelectorAll('.search-highlight').forEach(el => {
       el.classList.remove('search-highlight');
     });
-  }, [setShowSearch, clearSearch]);
+  }, [clearSearch]);
 
-  // ---- Highlight search matches in PDF text layer ----
-  const highlightRef = useRef<(() => void) | null>(null);
-
-  const applySearchHighlight = useCallback(() => {
-    // Clean up previous highlights
-    document.querySelectorAll('.search-highlight').forEach(el => {
-      el.classList.remove('search-highlight');
-    });
-
-    if (!searchResult || searchResult.totalMatches === 0) return;
-
-    const currentMatch = searchResult.matches[searchResult.currentMatchIndex];
-    if (!currentMatch) return;
-
-    // Find the text layer for the current page
-    const pageEl = document.querySelector(`[data-page-number="${currentMatch.pageNumber}"]`);
-    if (!pageEl) return;
-
-    const textLayer = pageEl.querySelector('.react-pdf__Page__textContent');
-    if (!textLayer) return;
-
-    // Extract the search text (strip leading/trailing … and whitespace)
-    const rawText = currentMatch.text;
-    const searchText = rawText.replace(/^…\s*/, '').replace(/\s*…$/, '').trim().toLowerCase();
-    if (!searchText) return;
-
-    // Find matching spans
-    const spans = textLayer.querySelectorAll('span');
-    for (const span of spans) {
-      const spanText = (span.textContent || '').toLowerCase();
-      if (spanText.includes(searchText)) {
-        span.classList.add('search-highlight');
-      }
-    }
-  }, [searchResult]);
-
-  // Watch for search result changes to apply highlights
-  useEffect(() => {
-    if (!searchResult || searchResult.totalMatches === 0) return;
-
-    // Small timeout to let the PDF text layer re-render
-    const timer = setTimeout(() => {
-      applySearchHighlight();
-    }, 200);
-
-    return () => clearTimeout(timer);
-  }, [searchResult, applySearchHighlight]);
-
-  // Cleanup highlights on unmount
-  useEffect(() => {
-    return () => {
-      document.querySelectorAll('.search-highlight').forEach(el => {
-        el.classList.remove('search-highlight');
-      });
-    };
-  }, []);
-
-  // Cleanup blob URL on unmount
-  useEffect(() => {
-    return () => {
-      if (pdfBlobUrl && pdfBlobUrl.startsWith('blob:')) {
-        URL.revokeObjectURL(pdfBlobUrl);
-      }
-    };
-  }, [pdfBlobUrl]);
-
-  // ---- Compute page dimensions ----
+  // ── Compute page dimensions ──
   const pageWidth = viewMode === 'spread'
     ? Math.min(containerWidth * 0.45 * zoomLevel, 600)
-    : Math.min(containerWidth, 800) * zoomLevel;
+    : Math.min(containerWidth, isMobile ? 1000 : 800) * zoomLevel;
 
   const progressPercent = numPages ? (currentPage / numPages) * 100 : 0;
 
-  // ---- Active page check ----
   const isCurrentPage = (pageNum: number): boolean => {
     if (viewMode === 'scroll') return pageNum === currentPage;
     if (viewMode === 'single') return pageNum === currentPage;
@@ -433,41 +396,49 @@ export default function ReaderPage() {
     return false;
   };
 
-  // ---- Render functions ----
+  // ── Build search state for SearchPanel ──
+  const searchState = {
+    query,
+    matches,
+    totalResults,
+    currentMatchIndex,
+    searching,
+    error: searchError,
+  };
+
+  // ── Render functions ──
   const renderPage = (pageNum: number) => {
     const active = isCurrentPage(pageNum);
+
     return (
       <div
         key={`page_${pageNum}`}
         data-page-number={pageNum}
-        ref={(el) => {
-          if (el) pageElementsRef.current.set(pageNum, el);
-          else pageElementsRef.current.delete(pageNum);
-        }}
+        ref={observePageRef(pageNum)}
         className={`rounded-2xl overflow-hidden shadow-2xl mx-auto transition-all duration-200
           ${theme === 'sepia' ? 'shadow-amber-900/20' : 'shadow-black/40'}
           hover:shadow-2xl
           ${active ? 'ring-2 ring-purple-500/40 shadow-lg shadow-purple-500/10' : ''}`}
         style={{
           width: viewMode === 'spread' ? `${pageWidth}px` : 'fit-content',
-          maxWidth: `calc(100vw - ${showSidebar ? 384 + 96 + 60 : 96 + 60}px)`,
+          maxWidth: isMobile
+            ? 'calc(100vw - 32px)'
+            : `calc(100vw - ${effectiveSidebarVisible ? 384 + 96 + 60 : 96 + 60}px)`,
           marginBottom: viewMode === 'single' ? '0' : `${PAGE_GAP}px`,
           marginTop: viewMode === 'single' ? '0' : '0',
         }}
       >
-        <Page
-          pageNumber={pageNum}
+        <PageRenderer
+          pdf={pdfDocument}
+          pageIndex={pageNum - 1}
           width={pageWidth}
-          renderTextLayer={true}
-          renderAnnotationLayer={false}
-          className="bg-white"
         />
       </div>
     );
   };
 
   const renderScrollView = () => (
-    <div className="flex flex-col items-center py-4">
+    <div className="flex flex-col items-center py-4 px-2 md:px-0">
       {Array.from(new Array(numPages || 0), (_, i) => renderPage(i + 1))}
     </div>
   );
@@ -495,7 +466,6 @@ export default function ReaderPage() {
     for (let i = 1; i <= total; i += 2) {
       pairs.push([i, i + 1 <= total ? i + 1 : null]);
     }
-    // Show spread centered around current page
     const currentPairIndex = Math.floor((currentPage - 1) / 2);
     const start = Math.max(0, currentPairIndex - 1);
     const end = Math.min(pairs.length, currentPairIndex + 2);
@@ -523,19 +493,19 @@ export default function ReaderPage() {
 
   // =========== RENDER ===========
 
-  if (loading) {
+  if (pdfLoading && !pdfDocument) {
     return (
       <div className={`min-h-screen flex items-center justify-center ${theme === 'sepia' ? 'theme-sepia' : 'theme-night'}`}>
-        <LoadingSpinner message="Loading book..." />
+        <LoadingSpinner message="Loading PDF..." />
       </div>
     );
   }
 
-  if (error) {
+  if (pdfError) {
     return (
       <div className={`min-h-screen flex items-center justify-center ${theme === 'sepia' ? 'theme-sepia' : 'theme-night'}`}>
         <div className="text-center max-w-md">
-          <p className="text-red-400 mb-4">{error}</p>
+          <p className="text-red-400 mb-4">{pdfError}</p>
           <button
             onClick={() => navigate('/library')}
             className="px-4 py-2 rounded-xl bg-white/10 hover:bg-white/20 text-white font-medium transition-colors"
@@ -547,19 +517,20 @@ export default function ReaderPage() {
     );
   }
 
-  const sidebarOffset = showSidebar ? 384 : 0; // w-96 = 384px
+  const sidebarOffset = showSidebar ? 384 : 0;
 
   return (
     <div className={`h-screen flex flex-col ${theme === 'sepia' ? 'theme-sepia' : 'theme-night'}`}>
       <ReaderHeader
-        title={book?.title}
+        title="PDF Reader"
         currentPage={currentPage}
         numPages={numPages}
         theme={theme}
-        showSidebar={showSidebar}
+        showSidebar={effectiveSidebarVisible}
         zoomLevel={zoomLevel}
         viewMode={viewMode}
         progressPercent={progressPercent}
+        isMobile={isMobile}
         onToggleTheme={toggleTheme}
         onToggleSidebar={toggleSidebar}
         onBack={handleBack}
@@ -571,16 +542,18 @@ export default function ReaderPage() {
       />
 
       <div className="flex-1 flex overflow-hidden relative">
-        {/* Thumbnail sidebar */}
-        <ThumbnailSidebar
-          pdfBlobUrl={pdfBlobUrl || ''}
-          numPages={numPages}
-          currentPage={currentPage}
-          onPageClick={scrollToPage}
-          visible={!showSidebar}
-        />
+        {/* Thumbnail sidebar — hidden on mobile */}
+        {!isMobile && (
+          <ThumbnailSidebar
+            pdf={pdfDocument}
+            totalPages={numPages || 0}
+            currentPage={currentPage}
+            onPageClick={scrollToPage}
+            visible={!showSidebar}
+          />
+        )}
 
-        {/* PDF Viewer */}
+        {/* Page Viewer (react-pdf) */}
         <div
           ref={(node) => {
             scrollContainerRef.current = node;
@@ -588,7 +561,6 @@ export default function ReaderPage() {
             containerWidthRef.current = node;
           }}
           className="flex-1 overflow-y-auto overflow-x-hidden relative"
-          onScroll={handleScroll}
           onWheel={handleWheel}
         >
           {/* View mode backdrop for single/spread */}
@@ -599,7 +571,7 @@ export default function ReaderPage() {
           {/* Search Panel */}
           <SearchPanel
             query={query}
-            searchResult={searchResult}
+            searchState={searchState}
             showSearch={showSearch}
             onQueryChange={setQuery}
             onSearch={runSearch}
@@ -608,48 +580,31 @@ export default function ReaderPage() {
             onNavToPage={handleNavToPage}
           />
 
-          {/* Document */}
+          {/* Pages */}
           <div className={`relative z-10 ${theme === 'sepia' ? 'theme-sepia' : 'theme-night'}`}>
-            {pdfBlobUrl ? (
-              <Document
-                file={pdfBlobUrl}
-                onLoadSuccess={onDocumentLoadSuccess}
-                loading={
-                  <div className="flex items-center justify-center py-20">
-                    <LoadingSpinner message="Loading PDF..." />
-                  </div>
-                }
-                error={
-                  <div className="flex items-center justify-center py-20 text-red-500">
-                    Failed to load PDF
-                  </div>
-                }
-              >
+            {numPages && numPages > 0 ? (
+              <>
                 {viewMode === 'scroll' && renderScrollView()}
                 {viewMode === 'single' && renderSingleView()}
                 {viewMode === 'spread' && renderSpreadView()}
-              </Document>
+              </>
             ) : (
               <div className="flex items-center justify-center h-full min-h-[60vh]">
                 <div className="text-center">
-                  <p className="opacity-50 mb-4">Unable to load PDF viewer</p>
-                  <a
-                    href={getBookFileUrl(Number(bookId))}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="px-4 py-2 rounded-xl bg-white/10 hover:bg-white/20 text-white font-medium text-sm transition-colors"
-                  >
-                    Download PDF
-                  </a>
+                  <p className="opacity-50 mb-4">No pages loaded</p>
                 </div>
               </div>
             )}
           </div>
 
-          {/* Floating page navigation (bottom-right) — position relative to sidebar */}
+          {/* Floating page navigation (bottom-right) */}
           <div
             className="fixed bottom-6 z-40 flex items-center gap-2"
-            style={{ right: showSidebar ? `calc(1.5rem + ${sidebarOffset}px)` : '1.5rem' }}
+            style={{
+              right: isMobile
+                ? '1rem'
+                : showSidebar ? `calc(1.5rem + ${sidebarOffset}px)` : '1.5rem'
+            }}
           >
             <div className="glass rounded-xl px-3 py-2 flex items-center gap-2 text-xs">
               <span className="text-white/70 tabular-nums">
@@ -679,28 +634,28 @@ export default function ReaderPage() {
           </div>
         </div>
 
-      {/* Floating Translate Icon */}
-      {translateIconPos && selectedText && !translationResult && !wordResult && !translating && (
-        <button
-          onClick={handleTranslate}
-          className="fixed z-50 p-2 rounded-full bg-purple-600 hover:bg-purple-500 shadow-lg
-            transition-all duration-200 hover:scale-110 animate-bounce"
-          style={{
-            top: `${translateIconPos.top}px`,
-            left: `${translateIconPos.left}px`,
-            transform: 'translate(-50%, -50%)',
-          }}
-          title="Translate"
-        >
-          <svg className="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-              d="M3 5h12M3 12h18M3 19h6" />
-          </svg>
-        </button>
-      )}
+        {/* Floating Translate Icon */}
+        {translateIconPos && selectedText && !translationResult && !wordResult && !translating && (
+          <button
+            onClick={handleTranslate}
+            className="fixed z-50 p-2 rounded-full bg-purple-600 hover:bg-purple-500 shadow-lg
+              transition-all duration-200 hover:scale-110 animate-bounce"
+            style={{
+              top: `${translateIconPos.top}px`,
+              left: `${translateIconPos.left}px`,
+              transform: 'translate(-50%, -50%)',
+            }}
+            title="Translate"
+          >
+            <svg className="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                d="M3 5h12M3 12h18M3 19h6" />
+            </svg>
+          </button>
+        )}
 
-      {/* Translation Sidebar */}
-        {showSidebar && (
+        {/* Desktop Translation Sidebar */}
+        {!isMobile && showSidebar && (
           <div className="w-80 lg:w-96 flex-shrink-0 border-l border-white/10 overflow-y-auto">
             <TranslationPanel
               selectedText={selectedText}
@@ -718,6 +673,50 @@ export default function ReaderPage() {
               checkingExisting={checkingExisting}
               onVocabularyUpdated={onVocabularyUpdated}
             />
+          </div>
+        )}
+
+        {/* Mobile Translation Bottom Sheet */}
+        {isMobile && showMobileTranslation && (
+          <div className="fixed inset-x-0 bottom-0 z-50">
+            {/* Backdrop */}
+            <div
+              className="fixed inset-0 bg-black/60 backdrop-blur-sm mobile-bottom-sheet-backdrop"
+              onClick={handleCloseTranslation}
+            />
+
+            {/* Sheet */}
+            <div className="relative bg-gray-900 rounded-t-2xl border-t border-white/10 shadow-2xl max-h-[70vh] overflow-y-auto mobile-bottom-sheet">
+              <div className="sticky top-0 bg-gray-900 pt-3 pb-2 px-4 flex items-center justify-between border-b border-white/10">
+                <span className="text-sm font-semibold opacity-70 uppercase tracking-wider">Translation</span>
+                <button
+                  onClick={handleCloseTranslation}
+                  className="p-1 rounded-lg hover:bg-white/10 transition-colors"
+                >
+                  <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
+              <div className="p-4">
+                <TranslationPanel
+                  selectedText={selectedText}
+                  translationResult={translationResult}
+                  wordResult={wordResult}
+                  translationError={translationError}
+                  translating={translating}
+                  provider={provider}
+                  onProviderChange={setProvider}
+                  onTranslate={handleTranslate}
+                  onClose={handleCloseTranslation}
+                  onSaveToVocabulary={handleSaveToVocabulary}
+                  savedToVocabulary={savedToVocabulary}
+                  existingWord={existingWord}
+                  checkingExisting={checkingExisting}
+                  onVocabularyUpdated={onVocabularyUpdated}
+                />
+              </div>
+            </div>
           </div>
         )}
       </div>

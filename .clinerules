@@ -94,20 +94,26 @@ domain/repositories/
 #### Database (Postgres)
 ```
 infrastructure/database/postgres/
-  models.py           → SQLAlchemy ORM: User, Book, Chapter, Paragraph, TranslationRecord, VocabularyWord
+  models.py           → SQLAlchemy ORM: User, Book, Chapter, Paragraph, TranslationRecord, VocabularyWord, PageImage
                         VocabularyWord: id, user_id (FK), word, phonetic, definition, sentence_context,
                         sentence_context_translated, source_language, book_id (nullable FK), created_at, updated_at
+                        PageImage: id, book_id (FK), page_index, image_path, thumb_path, width, height, dpi, created_at
+                        Paragraph added columns: page_index (nullable, for PDF), bbox_x0/bbox_y0/bbox_x1/bbox_y1 (nullable floats)
   session.py          → engine, Base (DeclarativeBase), get_session() async generator
   repositories.py     → Consolidated impls: BookRepositoryImpl, ChapterRepositoryImpl,
                          ParagraphRepositoryImpl, UserRepositoryImpl, BaseRepositoryImpl,
-                         VocabularyRepositoryImpl
+                         VocabularyRepositoryImpl, PageImageRepositoryImpl
                           VocabularyRepositoryImpl: add_word, get_words_by_user, get_word_by_id, delete_word,
                                                      find_by_word, update_word
+                          PageImageRepositoryImpl: add_page_image, get_page_image, get_page_images_by_book, delete_page_images_by_book
                          All ORM-to-entity helpers: _book_from_orm, _chapter_from_orm,
                          _paragraph_from_orm, _user_from_orm, _vocab_word_from_orm
                          BaseRepositoryImpl provides shared __init__ accepting AsyncSession
   epub_parser.py      → EPUBParser: lazy chapter-by-chapter, extract_metadata(), extract_toc(), parse_chapter()
   pdf_parser.py       → PDFParser: same interface, PyMuPDF (fitz), lazy per-page, image embedding as base64 <img>
+                         New methods: get_page_count(), render_page() (returns WebP bytes), render_thumbnail() (small WebP),
+                         parse_page_with_positions() (returns paragraphs with bbox coords for text overlay),
+                         get_page_dimensions() (returns page width/height in points)
 ```
 
 #### AI / LLM
@@ -143,6 +149,7 @@ infrastructure/web/api/v1/
   app.py               → create_app() factory with @asynccontextmanager lifespan
                          Includes CORS middleware + route prefixes
                          Tables auto-created + migrations (ALTER TABLE ADD COLUMN IF NOT EXISTS) at startup
+                         Registers routers: auth, book, translation, vocabulary, page
   dependencies.py      → authenticate_request() → AuthenticatedUser dataclass (user + token + payload)
                          get_current_user() → User (for backward compatibility)
                          get_blacklist_service() → TokenBlacklistService (yield + cleanup)
@@ -164,12 +171,19 @@ infrastructure/web/api/v1/
                             PUT /api/v1/vocabulary/{id}, GET /api/v1/vocabulary/words/check
                             PUT: update word fields (word, phonetic, definition, sentence_context, sentence_context_translated, translation)
                             GET /words/check: ?word=TEXT → checks if word exists for current user
+    page_router.py      → GET /api/v1/pages/{book_id}/pages/{page_index}/image — serve rendered WebP page image
+                           GET /api/v1/pages/{book_id}/thumbnails/{page_index} — serve thumbnail
+                           GET /api/v1/pages/{book_id}/pages/{page_index}/text-overlay — per-paragraph bbox data
+                           GET /api/v1/pages/{book_id}/pages-info — list all page image URLs
+                           GET /api/v1/pages/{book_id}/page-count — total pages
+                           GET /api/v1/pages/{book_id}/search — full-text search across paragraphs
   schemas/
     auth_schemas.py     → RegisterRequest, LoginRequest, RefreshTokenRequest, TokenResponse, UserResponse
     book_schemas.py     → BookSchema (base), BookListItem (inherits), RegisterBookResponse (inherits),
-                          BookDetailResponse (inherits + chapters), ChapterResponse, ParagraphResponse,
+                          BookDetailResponse (inherits + chapters), ChapterResponse, ParagraphResponse (with bbox fields),
                           ChapterParagraphsResponse, TranslatePassageRequest/Response,
-                          TranslateTextRequest/Response, VocabularyWordSchema
+                          TranslateTextRequest/Response, VocabularyWordSchema,
+                          PageImageResponse, PageInfoResponse, SearchRequest, SearchResponse, SearchResultItem
                           TranslateTextResponse includes: translation, phonetic, definition, sentence_context
                           UpdateVocabularyWordRequest: editable word fields (all optional)
                           VocabularyCheckResponse: { exists: bool, word: VocabularyWordSchema | null }
@@ -187,8 +201,17 @@ infrastructure/web/api/v1/
 - **Lazy parsing**: chapters parsed on first access, first chapter parsed immediately on upload
 - **App lifecycle**: `@asynccontextmanager` lifespan hook for startup/shutdown cleanup
 - **Translation singleton**: `get_translation_service()` via `Depends()` in `dependencies.py`
-- **Smart selection UX**: `useTextSelection` hook auto-selects word on click (mousedown+same-position mouseup), enables drag for multi-word, calculates BoundingRect for floating translate icon; filters out clicks outside PDF text layer (fixes translate icon appearing on empty space); returns `isWordClick`, `leftContext`, `rightContext` for context-aware word translation; JS-based per-word hover via mouseenter/mouseleave event delegation (applies `.word-hover-highlight` class programmatically)
-- **Word detection**: backend `translate-text` endpoint auto-detects single-word vs. passage, returns `phonetic`, `definition`, `sentence_context` for dictionary lookup; full translation for passages
+- **react-pdf (PDF.js) PDF reader**: Pages are rendered client-side via `react-pdf`'s `<Page>` component with Canvas rendering. Native `<TextLayer>` provides perfect text selection, double-click word selection, drag multi-word, triple-click line. No server-side page rendering needed.
+- **useTextSelection hook**: Uses native `window.getSelection()` with `selectionchange` event listener. Auto-selects word on double-click via PDF.js TextLayer native behavior. Returns `selectedText`, `selectionRect`, `isWordClick`, `leftContext`, `rightContext`, `clearSelection`. No custom overlay spans.
+- **Word hover highlight**: CSS `.word-hover-highlight` class and `::selection` styling on PDF.js TextLayer. Hover uses `mouseover`/`mouseout` event delegation with `relatedTarget` guard on `.react-pdf__Page__textContent` spans.
+- **usePdfDocument hook**: Loads PDF file as blob via `getBookFileUrl()`, uses `pdfjs-dist`'s `getDocument()` directly. Sets up PDFDocumentProxy for `numPages`. Returns `{ pdfDocument, numPages, loading, error }`. Avoids react-pdf's `<Document>` component for full control over loading.
+- **usePdfSearch hook**: Client-side PDF text search using `pdfjs-dist`'s `getPageContent()` and custom `findAll()` on page text items. Returns `{ results, currentMatchIndex, setCurrentMatchByPage, nextMatch, prevMatch, searchQuery, setSearchQuery, isSearching }`. Completely replaces `useBackendSearch` — no backend API calls needed.
+- **SearchPanel accepts search results as props**: Receives `results`, `currentMatchIndex`, `onSelectResult`, `onNext`, `onPrev`, `onClose`, `query`, `onQueryChange` from parent (ReaderPage) instead of managing its own backend calls.
+- **ThumbnailSidebar uses react-pdf canvas**: Renders thumbnail pages using react-pdf's `<Page>` component with `scale={0.3}` or similar, applied to `canvas` rendering mode. Sidebar scrolls to current page, highlights it with purple border.
+- **PageRenderer uses react-pdf Page + TextLayer**: Renders a single PDF page using `<Page pageIndex={...}>` with `renderTextLayer={true}`. Passes `onRenderSuccess` to inform parent of actual page dimensions. Applies `theme-{style}` classes for sepia/night rendering.
+- **api.ts cleaned up**: Removed all page image/search functions (`getPageImageUrl`, `getPageThumbnailUrl`, `getPageTextOverlay`, `getPagesInfo`, `getBookPageCount`, `searchBook`, `getPageImageUrlWithToken`, `getPageThumbnailUrlWithToken`). Only Auth, Books (including `getBookFileUrl`), Translation, and Vocabulary remain.
+- **Deleted files**: `usePageImages.ts`, `useBackendSearch.ts` removed.
+- **Wider loading container**: PageRenderer container uses `max-w-[1400px]` to accommodate larger PDF pages.
 - **Vocabulary saves**: `TranslationPanel` has "Save to Vocabulary" button; `VocabularyPage` lists all saved words with phonetic/definition/context
 - **Vocabulary auto-check**: `useTranslation` auto-checks if word already exists on lookup; if found, shows "Already in vocabulary" state in TranslationPanel with edit button
 - **Vocabulary inline edit**: `TranslationPanel` shows inline edit form for existing words directly in the sidebar; `VocabularyPage` has edit mode with form fields for all word data
@@ -200,9 +223,8 @@ infrastructure/web/api/v1/
 - **Word phonetic format**: LLM returns 3-part phonetic string: `"word / pronunciation / Georgian script"` for single-word lookups (updated to use `/` separators with proper spacing)
 - **sentence_context_translated**: `translate-word` endpoint returns a `sentence_context_translated` field — the Georgian translation of the sentence context example. Stored in `VocabularyWord.sentence_context_translated` column. Displayed in `TranslationPanel` (amber-tinted block below original context) and `VocabularyPage` (amber-tinted text below italic context).
 - **Auto-clear translation**: ReaderPage auto-closes translation panel and resets "Saved to Vocabulary" state when new text is selected
-- **Word hover highlight**: `.word-hover-highlight` CSS class on index.css applied to PDF text layer spans on mouseover/mouseout via useTextSelection (useCapture phase). Uses mouseover/mouseout because mouseenter/mouseleave don't bubble, which caused entire line to highlight instead of individual words. mouseout handler checks `relatedTarget` to prevent flicker when moving between sibling spans.
-- **Translate icon click fix**: useTextSelection ignores clicks outside `.react-pdf__Page__textContent` (prevents translate icon on empty PDF areas)
 - **DB migrations**: `app.py` lifespan runs `ALTER TABLE ... ADD COLUMN IF NOT EXISTS` for schema additions to existing tables (since `create_all` only creates new tables)
+- **Mobile responsive Reader**: ReaderPage detects mobile via `window.innerWidth < 768`, provides bottom sheet for translation (70vh max, slide-up animation), full-width PDF pages with 0.7x initial zoom, compact ReaderHeader (12px height, simplified controls), auto-hides thumbnail sidebar and desktop translation sidebar
 
 ### Auth Flow
 1. `POST /api/v1/auth/register` → hash password → save user → return JWT (access + refresh)
@@ -214,16 +236,18 @@ infrastructure/web/api/v1/
 ### Book Processing Flow
 1. `POST /api/v1/books/register` (EPUB/PDF upload) → extract metadata + TOC → save Book + Chapters → parse first chapter → mark "ready"
 2. GET chapter → if not parsed, auto-parse from original file → save Paragraphs → mark chapter parsed
-3. `POST /api/v1/books/{id}/chapters/{cid}/translate` → select paragraph indices → build passage + context → TranslationService → return translation
-4. `POST /api/v1/books/{id}/translate-text` → arbitrary text selection → TranslationService
-5. `GET /api/v1/books/{id}/file` → serve original uploaded file
-6. `DELETE /api/v1/books/{id}` → delete from DB + remove file from disk
+3. `GET /api/v1/books/{id}/file` → serve original uploaded file (used by frontend react-pdf to load PDF via `getBookFileUrl()`)
+4. Frontend loads PDF via react-pdf `<Document>` → renders pages with Canvas + native TextLayer for text selection
+5. `POST /api/v1/books/{id}/translate-text` → arbitrary text selection → TranslationService
+6. `POST /api/v1/books/{id}/translate-word` → single-word lookup with context → returns phonetic, definition, sentence_context + translation
+7. `DELETE /api/v1/books/{id}` → delete from DB + remove file from disk
 
 ### Database Schema (SQLAlchemy ORM)
 - **users**: id, email, hashed_password, created_at, updated_at
-- **books**: id, user_id (FK), title, author, language, file_path, total_chapters, status, created_at, updated_at
+- **books**: id, user_id (FK), title, author, language, file_path, total_chapters, total_pages (nullable, for PDF), status, created_at, updated_at
 - **chapters**: id, book_id (FK), title, spine_index, sequence_start, sequence_end, paragraph_count, is_parsed, created_at
-- **paragraphs**: id, book_id (FK), chapter_id (FK), content, index, phonetic_transcription, created_at
+- **paragraphs**: id, book_id (FK), chapter_id (FK), content, index, page_index (nullable, for PDF), bbox_x0, bbox_y0, bbox_x1, bbox_y1 (nullable floats, PDF point coordinates), phonetic_transcription, created_at
+- **page_images**: id, book_id (FK), page_index, image_path, thumb_path, width, height, dpi, created_at
 - **translation_records**: id, user_id (FK), paragraph_id (FK), source_text, translated_text, provider, created_at
 
 ### Docker
@@ -233,19 +257,21 @@ infrastructure/web/api/v1/
 
 ---
 
-## Frontend Architecture (17 TypeScript/React files)
+## Frontend Architecture (18 TypeScript/React files)
 
 ### Tech Stack
 - **React 19**, **TypeScript**, **Vite**, **Tailwind CSS v4** (with `@import 'tailwindcss'` and `@theme` directive)
 - **React Router v7** for client-side routing
-- **react-pdf** (pdfjs-dist) for PDF rendering with text layer
+- **react-pdf + PDF.js PDF reader**: PDF rendered client-side via Canvas + native TextLayer for perfect text selection
 - **localStorage** JWT storage (token, refresh-token) via auth context
 - **Unified UI theme**: purple/dark gradient background (from-gray-900 via-purple-900 to-gray-900) applied via `body` in `index.css`
 - **Reader themes**: sepia/night toggles (default = system `prefers-color-scheme: dark`)
 - **Glassmorphism**: `.glass` utility class with backdrop-blur for cards/headers
 - **IntersectionObserver** for scroll-based page tracking & reading progress
-- **PDF.js search API** (`PDFFindController`) for in-document text search
-- **Thumbnail sidebar** using miniaturized react-pdf `Page` components
+- **Client-side PDF search** via `pdfjs-dist` text content extraction (no backend API calls)
+- **Thumbnail sidebar** using react-pdf's `<Page>` with canvas rendering
+- **Mobile responsive**: window width detection, bottom sheet translation panel (slide-up animation), compact header, auto-hide sidebar
+- **PDF rendering**: client-side via react-pdf `<Page>` (Canvas + native TextLayer)
 
 ### File Map
 ```
@@ -254,13 +280,19 @@ frontend/src/
   App.tsx              → Routes: /login, /library, /reader/:bookId, /vocabulary
   index.css            → Tailwind import + @theme vars + glass utility + sepia/night theme classes
                          + body bg gradient (purple/dark), scrollbar styling, PDF viewer overrides,
-                         page transition animations, search results styling
+                         page transition animations, search results styling,
+                         mobile bottom sheet animations, mobile PDF optimizations
   vite-env.d.ts        → Vite type declarations
 
   lib/
-    api.ts             → Axios instance + API functions (login, register, getBooks, uploadBook,
-                          getBookFileUrl, translateText, saveVocabularyWord, getVocabularyWords,
-                          deleteVocabularyWord). Axios interceptor handles token injection + 401 refresh.
+    api.ts             → Fetch-based API client (no Axios). Functions for all endpoints:
+                          Auth: login, register, refreshAccessToken, logout, getMe
+                          Books: listBooks, getBookDetail, registerBook (multipart), deleteBook, getBookFileUrl (with ?token)
+                          Translation: translateSelectedText, translateWord
+                          Vocabulary: listVocabularyWords, saveVocabularyWord, updateVocabularyWord,
+                           checkVocabularyWord, deleteVocabularyWord
+                          Token injection via Authorization header + ?token query param fallback for <img>/<a> tags.
+                          401 auto-refresh logic.
     auth.tsx           → AuthContext: login(), register(), logout(), getAccessToken()
                           localStorage: lingostream_token, lingostream_refresh
 
@@ -269,28 +301,36 @@ frontend/src/
     ReaderHeader.tsx    → Top bar with: title, page nav, theme toggle, sidebar toggle, back/logout,
                            zoom slider (± buttons), view mode selector (scroll/single/spread),
                            search toggle button (Ctrl+F), progress bar, jump-to-page input
+                           Supports `isMobile` prop for compact layout (12px height, icon-only controls)
     TranslationPanel.tsx → Sidebar panel: selected text, translate button, translation output,
                            provider selector (openai/gemini/deepseek), error/streaming states,
                            phonetic + definition display for words, "Save to Vocabulary" button
-    ThumbnailSidebar.tsx → Collapsible left sidebar with mini PDF page thumbnails,
-                           current page highlight, click-to-navigate, scroll tracking
-    SearchPanel.tsx      → Overlay panel: search input with debounce (400ms),
+    ThumbnailSidebar.tsx → Collapsible left sidebar using react-pdf's `<Page>` component with
+                           canvas rendering for thumbnails, current page highlight (purple border),
+                           scroll tracking, click-to-navigate
+    SearchPanel.tsx      → Overlay panel: receives search results from parent (ReaderPage),
                            match counter + prev/next navigation, clickable results list,
                            keyboard shortcuts (Enter, Shift+Enter, Esc)
+    PageRenderer.tsx     → Renders a single PDF page using react-pdf's `<Page>` with
+                           `renderTextLayer={true}` for native text selection.
+                           Applies theme classes for sepia/night.
 
   hooks/
+    usePdfDocument.ts    → Loads PDF file as blob via getBookFileUrl(), uses pdfjs-dist's
+                           getDocument() directly. Returns { pdfDocument, numPages, loading, error }
+    usePdfSearch.ts      → Client-side PDF text search using pdfjs-dist getPageContent() and
+                           custom findAll(). Returns { results, currentMatchIndex, nextMatch,
+                           prevMatch, searchQuery, setSearchQuery, isSearching }
     useContainerWidth.ts  → ResizeObserver on PDF container ref
-    usePdfLoader.ts       → Fetches book metadata + PDF blob from API, returns book/loading/error
-    useTextSelection.ts   → Auto-selects word on click (mousedown+same-position mouseup),
-                           enables drag for multi-word, calculates BoundingRect for floating translate icon,
-                           returns selectedText, selectionRect, clearSelection
+    useTextSelection.ts   → Uses native window.getSelection() with selectionchange event listener.
+                           Auto-selects word on double-click via PDF.js TextLayer native behavior.
+                           Returns selectedText, selectionRect, isWordClick, leftContext,
+                           rightContext, clearSelection.
     useTranslation.ts     → Manages translate(), streaming text, translation result, provider state,
-                           handles phonetic, definition, sentence_context fields
-    useReadingProgress.ts → Scroll-based progress tracking via IntersectionObserver,
-                            saves/restores position to localStorage
-    usePdfSearch.ts       → Wraps PDF.js PDFFindController for in-document search,
-                            returns matches with page numbers + context text,
-                            navigation helpers (next/prev match)
+                            handles phonetic, definition, sentence_context fields,
+                            checks existing vocabulary words on lookup
+    useReadingProgress.ts → Scroll-based progress tracking via IntersectionObserver on page elements,
+                            saves/restores position to localStorage (reading_progress_{bookId})
 
   pages/
     LoginPage.tsx        → Purple/dark glass card, background blobs, LoadingSpinner
@@ -298,36 +338,38 @@ frontend/src/
                            "Vocabulary" button in header
     VocabularyPage.tsx   → Saved words list with phonetic, definition, sentence context,
                            delete button per word, back to library navigation
-    ReaderPage.tsx       → PDF viewer + translation sidebar, delegates to hooks + components,
-                           dark mode auto-detection via `window.matchMedia`,
+    ReaderPage.tsx       → react-pdf Document-based PDF reader with native TextLayer text selection.
+                           Uses usePdfDocument for PDF loading + usePdfSearch for client-side search.
+                           Dark mode auto-detection via window.matchMedia,
                            keyboard shortcuts (← →, PgUp PgDn, Home, End, Ctrl+F),
-                           Ctrl+Wheel zoom, IntersectionObserver page tracking,
-                           floating page nav bottom-right, scroll/single/spread view modes
+                           Ctrl+Wheel zoom, IntersectionObserver page tracking on rendered page divs,
+                           floating page nav bottom-right, scroll/single/spread view modes,
+                           mobile detection with bottom sheet translation (70vh max, slide-up animation),
+                           compact initial zoom (0.7), full-width pages on mobile
 ```
 
 ### Key Patterns
-- **Custom hooks** for all stateful logic (API calls, selection, translation, resize observer, progress, search)
-- **Separate components** for UI blocks (LoadingSpinner, ReaderHeader, TranslationPanel, ThumbnailSidebar, SearchPanel)
+- **react-pdf (PDF.js) PDF reader**: Pages rendered client-side via Canvas + native TextLayer. Text selection is native browser behavior.
+- **Custom hooks** for all stateful logic (document loading, selection, translation, search, resize observer, progress)
+- **Separate components** for UI blocks (LoadingSpinner, ReaderHeader, TranslationPanel, ThumbnailSidebar, SearchPanel, PageRenderer)
 - **AuthContext** via React context for global auth state + token management
-- **Axios interceptors** in api.ts for automatic token injection + 401 refresh
+- **Fetch-based API client** (no Axios). Token injection via `Authorization: Bearer` header + `?token=` query param fallback for `<img>`/`<a>` tags
 - **Callback memoization** with `useCallback` for event handlers passed as props
 - **CSS themes** via `.theme-sepia` / `.theme-night` class toggles
 - **Dark mode auto-detection**: ReaderPage uses `window.matchMedia('(prefers-color-scheme: dark)')` to set default reader theme
 - **IntersectionObserver** for page tracking (thresholds: 0.1, 0.3, 0.6) with `isScrollingRef` guard
 - **Reading progress** saved to `localStorage` keyed by `reading_progress_{bookId}` with page number + percentage
-- **Search** uses custom `usePdfSearch` hook with per-page text extraction, match counting, page navigation, and `setCurrentMatchByPage` for click-to-navigate
-- **Search highlights** applied via `.search-highlight` CSS class on PDF text layer spans (purple background + border)
+- **Search** uses custom `usePdfSearch` hook with client-side PDF text extraction, no backend API calls
+- **Search highlights** applied via `.search-highlight` CSS class on text layer spans (purple background + border)
 - **View modes**: scroll (infinite vertical), single (previous/current/next pages), spread (two-page pairs)
-- **Zoom**: Ctrl+Wheel listener, slider in header, clamped 0.5x–3.0x
+- **Zoom**: Ctrl+Wheel listener, slider in header, clamped 0.5x–3.0x, 0.7x default on mobile
 - **Keyboard shortcuts**: ←/PgUp (prev), →/PgDn (next), Home (page 1), End (last page), Ctrl+F (search), Esc (close search)
 - **Loading states** use reusable `<LoadingSpinner>` component with `light`/`inline` variants
 - **Error states** handled inline per component/page
 - **Absolutely no inline spinner HTML** — every page uses `<LoadingSpinner>`
 - **Consistent color palette**: all pages share purple/dark gradient (`from-gray-900 via-purple-900 to-gray-900`) for a unified look
 - **`ViewMode` type** exported from ReaderHeader: `'scroll' | 'single' | 'spread'`
-- **`SearchResult` type** exported from usePdfSearch: `{ matches: Match[], currentMatchIndex: number, totalMatches: number }`
-- **`SearchMatch` type** exported from usePdfSearch: `{ pageIndex, pageNumber, text, matchIndex }`
-- **`setCurrentMatchByPage`** exported from usePdfSearch: updates `currentMatchIndex` to first match on given page
+- **Mobile responsive**: ReaderPage detects mobile (width < 768px), renders translation as bottom sheet with slide-up animation (CSS `.mobile-bottom-sheet`, `.mobile-bottom-sheet-backdrop`), compact header (12px height, icon-only sign out, no zoom/theme/jump controls), hides thumbnail sidebar and desktop sidebar, full-width PDF pages (`calc(100vw - 32px)`), initial zoom 0.7x
 
 ---
 

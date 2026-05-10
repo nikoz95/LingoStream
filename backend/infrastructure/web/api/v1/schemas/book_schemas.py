@@ -14,6 +14,7 @@ class BookSchema(BaseModel):
     title: str
     author: str
     total_chapters: int
+    total_pages: int = 0
     language: str
     status: str
     created_at: Optional[datetime] = None
@@ -63,6 +64,11 @@ class ParagraphResponse(BaseModel):
     chapter_id: int
     content: str
     index: int
+    page_index: Optional[int] = None
+    bbox_x0: Optional[float] = None
+    bbox_y0: Optional[float] = None
+    bbox_x1: Optional[float] = None
+    bbox_y1: Optional[float] = None
     phonetic_transcription: Optional[str] = None
 
     model_config = {"from_attributes": True}
@@ -72,6 +78,58 @@ class ChapterParagraphsResponse(BaseModel):
     """A chapter with all its paragraphs."""
     chapter: ChapterResponse
     paragraphs: List[ParagraphResponse]
+
+
+# ── Page schemas ─────────────────────────────────────────────────────────
+
+
+class PageInfoResponse(BaseModel):
+    """Information about a rendered PDF page."""
+    book_id: int
+    page_index: int
+    width: int
+    height: int
+    dpi: int
+    paragraphs: List[ParagraphResponse]
+
+
+class PageImageResponse(BaseModel):
+    """Response for a single rendered page image URL."""
+    book_id: int
+    page_index: int
+    image_url: str
+    thumb_url: Optional[str] = None
+    width: int
+    height: int
+
+
+# ── Search schemas ───────────────────────────────────────────────────────
+
+
+class SearchRequest(BaseModel):
+    """Request to search within a book."""
+    query: str
+
+
+class SearchResultItem(BaseModel):
+    """A single search result within a book's paragraphs."""
+    paragraph_id: int
+    book_id: int
+    chapter_id: int
+    page_index: Optional[int] = None
+    content: str
+    index: int
+    bbox_x0: Optional[float] = None
+    bbox_y0: Optional[float] = None
+    bbox_x1: Optional[float] = None
+    bbox_y1: Optional[float] = None
+
+
+class SearchResponse(BaseModel):
+    """Response for a book search."""
+    query: str
+    total_results: int
+    results: List[SearchResultItem]
 
 
 # ── Translation schemas ─────────────────────────────────────────────────

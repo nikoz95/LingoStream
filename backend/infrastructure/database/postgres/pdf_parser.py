@@ -4,17 +4,26 @@ PDF Parser — lazy page-by-page parsing (same interface as EPUBParser).
 Uses PyMuPDF (fitz) to extract text and images from PDF files.
 Chapters are inferred from built-in TOC; falls back to scanning for
 headings or treating each page as a chapter.
+
+Supports server-side page rendering (render_page) and bbox-aware
+paragraph extraction (parse_page_with_positions) for the image+overlay
+reader approach.
 """
 
 import base64
+import io
+import os
 import re
-from typing import List, Tuple
+from typing import List, Optional, Tuple
 
 import fitz
 
 
 class PDFParser:
     """Parser for PDF files with lazy page-by-page processing."""
+
+    RENDER_DPI = 150
+    THUMB_DPI = 72
 
     def __init__(self) -> None:
         self._doc_cache: dict[str, fitz.Document] = {}
@@ -24,6 +33,12 @@ class PDFParser:
         if file_path not in self._doc_cache:
             self._doc_cache[file_path] = fitz.open(file_path)
         return self._doc_cache[file_path]
+
+    def close(self) -> None:
+        """Close all cached documents."""
+        for doc in self._doc_cache.values():
+            doc.close()
+        self._doc_cache.clear()
 
     @staticmethod
     def _normalize_title(raw: str) -> str:
@@ -181,5 +196,124 @@ class PDFParser:
             if meaningful:
                 paragraphs.append((idx, " ".join(meaningful)))
                 idx += 1
+
+        return paragraphs
+
+    # ────────────────────────────────────────────────────────────────────────
+    # Methods for server-side page image rendering + bbox extraction
+    # ────────────────────────────────────────────────────────────────────────
+
+    def get_page_count(self, file_path: str) -> int:
+        """Return total number of pages in the PDF."""
+        doc = self._get_doc(file_path)
+        return len(doc)
+
+    def render_page(self, file_path: str, page_index: int, dpi: Optional[int] = None) -> bytes:
+        """
+        Render a single PDF page as a PNG image (bytes).
+
+        Args:
+            file_path: Path to the PDF file.
+            page_index: 0-based page index.
+            dpi: Resolution for rendering (defaults to RENDER_DPI=150).
+
+        Returns:
+            PNG image bytes.
+        """
+        doc = self._get_doc(file_path)
+        if page_index < 0 or page_index >= len(doc):
+            raise ValueError(f"Page index {page_index} out of range (0-{len(doc) - 1})")
+
+        page = doc[page_index]
+        pix = page.get_pixmap(dpi=dpi or self.RENDER_DPI)
+        return pix.tobytes("png")
+
+    def get_page_dimensions(self, file_path: str, page_index: int) -> Optional[Tuple[float, float]]:
+        """Get the width and height of a page in points."""
+        doc = self._get_doc(file_path)
+        if page_index < 0 or page_index >= len(doc):
+            return None
+        page = doc[page_index]
+        rect = page.rect
+        return (float(rect.width), float(rect.height))
+
+    def render_thumbnail(self, file_path: str, page_index: int) -> bytes:
+        """
+        Render a single PDF page as a small PNG thumbnail (bytes).
+
+        Args:
+            file_path: Path to the PDF file.
+            page_index: 0-based page index.
+
+        Returns:
+            PNG thumbnail bytes (72 DPI, max 320px wide).
+        """
+        doc = self._get_doc(file_path)
+        if page_index < 0 or page_index >= len(doc):
+            raise ValueError(f"Page index {page_index} out of range (0-{len(doc) - 1})")
+
+        page = doc[page_index]
+        # Determine zoom to constrain width to ~320px
+        rect = page.rect
+        zoom = min(320.0 / rect.width, 2.0)  # scale but cap at 2x
+        mat = fitz.Matrix(zoom, zoom)
+        pix = page.get_pixmap(matrix=mat)
+        return pix.tobytes("png")
+
+    def parse_page_with_positions(
+        self, file_path: str, spine_index: int, page_index: int, start_global_index: int = 0
+    ) -> List[Tuple[int, str, float, float, float, float]]:
+        """
+        Parse a single PDF page into paragraphs with bounding box coordinates.
+
+        Args:
+            file_path: Path to the PDF file.
+            spine_index: The spine index (page number in 1-chapter=1-page layout).
+            page_index: The global 0-based page index (same as spine_index for now).
+            start_global_index: Starting index for paragraph numbering.
+
+        Returns:
+            List of tuples: (global_index, text, bbox_x0, bbox_y0, bbox_x1, bbox_y1)
+
+        The bbox coordinates are in PDF page coordinate space (points).
+        The frontend will scale them by (rendered_width / page_rect.width).
+        """
+        doc = self._get_doc(file_path)
+        if spine_index < 0 or spine_index >= len(doc):
+            return []
+
+        page = doc[spine_index]
+        page_rect = page.rect  # page dimensions in points
+        blocks = page.get_text("dict")["blocks"]
+        blocks.sort(key=lambda b: (b["bbox"][1], b["bbox"][0]))
+
+        paragraphs: List[Tuple[int, str, float, float, float, float]] = []
+        idx = start_global_index
+
+        for block in blocks:
+            if block.get("type", 0) == 1:  # image block — skip for text overlay
+                continue
+
+            text = self._extract_text_from_block(block).strip()
+            if not text or len(text) <= 10:
+                continue
+
+            lines = text.split("\n")
+            meaningful = [l for l in lines if l.strip() and len(l.strip()) > 3]
+            if not meaningful:
+                continue
+
+            combined = " ".join(meaningful)
+            bbox = block["bbox"]  # [x0, y0, x1, y1] in PDF points
+
+            paragraphs.append((
+                idx,
+                combined,
+                float(bbox[0]),
+                float(bbox[1]),
+                float(bbox[2]),
+                float(bbox[3]),
+            ))
+            idx += 1
 
         return paragraphs

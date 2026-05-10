@@ -80,27 +80,31 @@ body {
   margin: 0 auto;
 }
 
-.pdf-viewer canvas {
-  width: 100% !important;
-  height: auto !important;
-}
-
 /* Page wrapper shadow & transitions */
 .react-pdf__Page {
+  position: relative;
   transition: box-shadow 0.2s ease;
 }
 
-/* Single & spread view: page fills viewport height */
-.theme-single .react-pdf__Page,
-.theme-spread .react-pdf__Page {
-  max-height: calc(100vh - 8rem);
+/* ========= react-pdf TextLayer: overlay on top of canvas ========= */
+.react-pdf__Page__textContent {
+  position: absolute !important;
+  top: 0 !important;
+  left: 0 !important;
+  right: 0 !important;
+  bottom: 0 !important;
+  overflow: hidden;
+  line-height: 1.0;
+  text-align: initial;
+  pointer-events: auto !important;
+  z-index: 1;
 }
 
-.theme-single canvas,
-.theme-spread canvas {
-  max-height: calc(100vh - 8rem) !important;
-  object-fit: contain;
+.react-pdf__Page__textContent span {
+  color: transparent !important;
+  cursor: text;
 }
+
 
 /* Thumbnail sidebar canvas sizing */
 [data-thumb-page] .react-pdf__Page {
@@ -169,4 +173,51 @@ body, .theme-transition {
   border-radius: 3px !important;
   cursor: pointer;
   transition: background 0.15s ease;
+}
+
+/* ========= Mobile bottom sheet animation ========= */
+@keyframes slideUp {
+  from {
+    transform: translateY(100%);
+  }
+  to {
+    transform: translateY(0);
+  }
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.mobile-bottom-sheet {
+  animation: slideUp 0.3s ease-out;
+}
+
+.mobile-bottom-sheet-backdrop {
+  animation: fadeIn 0.2s ease-out;
+}
+
+/* ========= Prevent iOS zoom on double-tap / long-press ========= */
+.react-pdf__Page {
+  touch-action: manipulation;
+  -webkit-touch-callout: none;
+}
+
+/* ========= Mobile-specific PDF optimizations ========= */
+@media (max-width: 767px) {
+  .react-pdf__Page {
+    max-width: 100vw !important;
+  }
+
+  .react-pdf__Page canvas {
+    width: 100% !important;
+    height: auto !important;
+  }
+
+  /* Touch-friendly page nav */
+  .page-nav-mobile button {
+    min-width: 44px;
+    min-height: 44px;
+  }
 }

@@ -321,3 +321,4 @@ export async function checkVocabularyWord(word: string): Promise<CheckVocabulary
 export async function deleteVocabularyWord(wordId: number): Promise<void> {
   return request(`/vocabulary/words/${wordId}`, { method: 'DELETE' });
 }
+

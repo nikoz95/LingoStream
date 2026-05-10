@@ -4,7 +4,7 @@ All models inherit from the canonical ``Base`` defined in ``session.py``.
 """
 from datetime import datetime, timezone
 
-from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Integer, String, Text
+from sqlalchemy import Boolean, Column, DateTime, Float, ForeignKey, Integer, String, Text
 
 from infrastructure.database.postgres.session import Base
 
@@ -33,6 +33,7 @@ class Book(Base):
     language = Column(String(10), default="en")
     file_path = Column(String(1000), nullable=False)
     total_chapters = Column(Integer, default=0)
+    total_pages = Column(Integer, default=0)
     status = Column(String(20), default="indexed")
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     updated_at = Column(
@@ -64,7 +65,27 @@ class Paragraph(Base):
     chapter_id = Column(Integer, ForeignKey("chapters.id"), nullable=False)
     content = Column(Text, nullable=False)
     index = Column(Integer, nullable=False)
+    page_index = Column(Integer, nullable=True)
+    bbox_x0 = Column(Float, nullable=True)
+    bbox_y0 = Column(Float, nullable=True)
+    bbox_x1 = Column(Float, nullable=True)
+    bbox_y1 = Column(Float, nullable=True)
     phonetic_transcription = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+
+
+class PageImage(Base):
+    """Rendered page images for PDF books (server-side rendered, no PDF.js needed)."""
+    __tablename__ = "page_images"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    book_id = Column(Integer, ForeignKey("books.id"), nullable=False, index=True)
+    page_index = Column(Integer, nullable=False)
+    image_path = Column(String(1000), nullable=False)
+    thumb_path = Column(String(1000), nullable=False)
+    width = Column(Integer, nullable=False)
+    height = Column(Integer, nullable=False)
+    dpi = Column(Integer, default=150)
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
 
