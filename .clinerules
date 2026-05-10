@@ -94,26 +94,27 @@ domain/repositories/
 #### Database (Postgres)
 ```
 infrastructure/database/postgres/
-  models.py           → SQLAlchemy ORM: User, Book, Chapter, Paragraph, TranslationRecord, VocabularyWord, PageImage
+  models.py           → SQLAlchemy ORM: User, Book, Chapter, Paragraph, TranslationRecord, VocabularyWord
                         VocabularyWord: id, user_id (FK), word, phonetic, definition, sentence_context,
                         sentence_context_translated, source_language, book_id (nullable FK), created_at, updated_at
-                        PageImage: id, book_id (FK), page_index, image_path, thumb_path, width, height, dpi, created_at
-                        Paragraph added columns: page_index (nullable, for PDF), bbox_x0/bbox_y0/bbox_x1/bbox_y1 (nullable floats)
+                        Paragraph: page_index (nullable, for PDF), bbox_x0/bbox_y0/bbox_x1/bbox_y1 (nullable floats, per-word)
+                        PageImage model REMOVED — no server-side page rendering
   session.py          → engine, Base (DeclarativeBase), get_session() async generator
   repositories.py     → Consolidated impls: BookRepositoryImpl, ChapterRepositoryImpl,
                          ParagraphRepositoryImpl, UserRepositoryImpl, BaseRepositoryImpl,
-                         VocabularyRepositoryImpl, PageImageRepositoryImpl
+                         VocabularyRepositoryImpl
                           VocabularyRepositoryImpl: add_word, get_words_by_user, get_word_by_id, delete_word,
                                                      find_by_word, update_word
-                          PageImageRepositoryImpl: add_page_image, get_page_image, get_page_images_by_book, delete_page_images_by_book
+                          PageImageRepositoryImpl REMOVED
                          All ORM-to-entity helpers: _book_from_orm, _chapter_from_orm,
                          _paragraph_from_orm, _user_from_orm, _vocab_word_from_orm
                          BaseRepositoryImpl provides shared __init__ accepting AsyncSession
   epub_parser.py      → EPUBParser: lazy chapter-by-chapter, extract_metadata(), extract_toc(), parse_chapter()
-  pdf_parser.py       → PDFParser: same interface, PyMuPDF (fitz), lazy per-page, image embedding as base64 <img>
-                         New methods: get_page_count(), render_page() (returns WebP bytes), render_thumbnail() (small WebP),
-                         parse_page_with_positions() (returns paragraphs with bbox coords for text overlay),
-                         get_page_dimensions() (returns page width/height in points)
+  pdf_parser.py       → PDFParser: PyMuPDF (fitz). Extracts per-word bounding boxes.
+                         Methods: get_page_count(), parse_page_with_positions() (returns per-word bbox data:
+                         word, x0, y0, x1, y1 for each word on the page), get_page_dimensions().
+                         REMOVED: render_page(), render_thumbnail(), get_page_dimensions_for_pdf()
+                         — no server-side page images are generated.
 ```
 
 #### AI / LLM
@@ -149,7 +150,8 @@ infrastructure/web/api/v1/
   app.py               → create_app() factory with @asynccontextmanager lifespan
                          Includes CORS middleware + route prefixes
                          Tables auto-created + migrations (ALTER TABLE ADD COLUMN IF NOT EXISTS) at startup
-                         Registers routers: auth, book, translation, vocabulary, page
+                         Registers routers: auth, book, translation, vocabulary
+                         page_router REMOVED — no server-side page rendering APIs
   dependencies.py      → authenticate_request() → AuthenticatedUser dataclass (user + token + payload)
                          get_current_user() → User (for backward compatibility)
                          get_blacklist_service() → TokenBlacklistService (yield + cleanup)
@@ -160,6 +162,7 @@ infrastructure/web/api/v1/
     book_router.py      → POST /api/v1/books/register, GET /api/v1/books, GET /api/v1/books/{id},
                            GET /api/v1/books/{id}/chapters, GET /api/v1/books/{id}/chapters/{cid},
                            GET /api/v1/books/{id}/chapters/{cid}/paragraphs,
+                           GET /api/v1/books/{id}/word-positions/{page_index} — fetch per-word bbox data for a page,
                            GET /api/v1/books/{id}/file, DELETE /api/v1/books/{id}
                            Helpers: _get_parser(), _chapter_to_response(), _paragraph_to_response(),
                                     _get_owned_book(), _ensure_chapter_parsed()
@@ -171,22 +174,19 @@ infrastructure/web/api/v1/
                             PUT /api/v1/vocabulary/{id}, GET /api/v1/vocabulary/words/check
                             PUT: update word fields (word, phonetic, definition, sentence_context, sentence_context_translated, translation)
                             GET /words/check: ?word=TEXT → checks if word exists for current user
-    page_router.py      → GET /api/v1/pages/{book_id}/pages/{page_index}/image — serve rendered WebP page image
-                           GET /api/v1/pages/{book_id}/thumbnails/{page_index} — serve thumbnail
-                           GET /api/v1/pages/{book_id}/pages/{page_index}/text-overlay — per-paragraph bbox data
-                           GET /api/v1/pages/{book_id}/pages-info — list all page image URLs
-                           GET /api/v1/pages/{book_id}/page-count — total pages
-                           GET /api/v1/pages/{book_id}/search — full-text search across paragraphs
   schemas/
     auth_schemas.py     → RegisterRequest, LoginRequest, RefreshTokenRequest, TokenResponse, UserResponse
     book_schemas.py     → BookSchema (base), BookListItem (inherits), RegisterBookResponse (inherits),
                           BookDetailResponse (inherits + chapters), ChapterResponse, ParagraphResponse (with bbox fields),
                           ChapterParagraphsResponse, TranslatePassageRequest/Response,
                           TranslateTextRequest/Response, VocabularyWordSchema,
-                          PageImageResponse, PageInfoResponse, SearchRequest, SearchResponse, SearchResultItem
+                          SearchRequest, SearchResponse, SearchResultItem, WordPositionResponse, WordPositionsResponse
                           TranslateTextResponse includes: translation, phonetic, definition, sentence_context
                           UpdateVocabularyWordRequest: editable word fields (all optional)
                           VocabularyCheckResponse: { exists: bool, word: VocabularyWordSchema | null }
+                          WordPositionResponse: { word: string, x0: float, y0: float, x1: float, y1: float }
+                          WordPositionsResponse: { page_index: int, page_width: float, page_height: float, words: WordPositionResponse[] }
+                          REMOVED: PageImageResponse, PageInfoResponse
                           Inheritance used to share repeated book fields
 ```
 
@@ -201,16 +201,21 @@ infrastructure/web/api/v1/
 - **Lazy parsing**: chapters parsed on first access, first chapter parsed immediately on upload
 - **App lifecycle**: `@asynccontextmanager` lifespan hook for startup/shutdown cleanup
 - **Translation singleton**: `get_translation_service()` via `Depends()` in `dependencies.py`
-- **react-pdf (PDF.js) PDF reader**: Pages are rendered client-side via `react-pdf`'s `<Page>` component with Canvas rendering. Native `<TextLayer>` provides perfect text selection, double-click word selection, drag multi-word, triple-click line. No server-side page rendering needed.
+- **PDF architecture — TWO sources of word selection**:
+  1. **PDF.js native TextLayer** — for mouse-based desktop interactions (double-click word, drag-select multi-word, triple-click line). This provides pixel-perfect native text selection in the browser. Used by `useTextSelection` hook.
+  2. **Backend per-word bounding boxes** (via `GET /api/v1/books/{id}/word-positions/{page_index}`) — for mobile long-press + loupe interaction. These provide precise word-level bbox coordinates that the loupe uses to determine which word is under the finger. Also used for `useWordPositions` hook.
+- **No server-side page rendering**: Backend does NOT render page images or thumbnails. PDF is rendered client-side by react-pdf.
 - **useTextSelection hook**: Uses native `window.getSelection()` with `selectionchange` event listener. Auto-selects word on double-click via PDF.js TextLayer native behavior. Returns `selectedText`, `selectionRect`, `isWordClick`, `leftContext`, `rightContext`, `clearSelection`. No custom overlay spans.
-- **Word hover highlight**: CSS `.word-hover-highlight` class and `::selection` styling on PDF.js TextLayer. Hover uses `mouseover`/`mouseout` event delegation with `relatedTarget` guard on `.react-pdf__Page__textContent` spans.
+- **useWordPositions hook**: Fetches per-word bbox data from backend for a given page. Returns `{ words, pageWidth, pageHeight, loading }`. Used by MobileLoupe to map finger position to the closest word under the touch point.
 - **usePdfDocument hook**: Loads PDF file as blob via `getBookFileUrl()`, uses `pdfjs-dist`'s `getDocument()` directly. Sets up PDFDocumentProxy for `numPages`. Returns `{ pdfDocument, numPages, loading, error }`. Avoids react-pdf's `<Document>` component for full control over loading.
-- **usePdfSearch hook**: Client-side PDF text search using `pdfjs-dist`'s `getPageContent()` and custom `findAll()` on page text items. Returns `{ results, currentMatchIndex, setCurrentMatchByPage, nextMatch, prevMatch, searchQuery, setSearchQuery, isSearching }`. Completely replaces `useBackendSearch` — no backend API calls needed.
+- **usePdfSearch hook**: Client-side PDF text search using `pdfjs-dist`'s `getPageContent()` and custom `findAll()` on page text items. Returns `{ results, currentMatchIndex, setCurrentMatchByPage, nextMatch, prevMatch, searchQuery, setSearchQuery, isSearching }`. No backend API calls needed.
+- **MobileLoupe component**: Long-press on PDF page activates a circular magnifier window above the finger. Shows 2x zoom of the PDF canvas content beneath. Highlights the word whose backend bbox contains the touch point. Word is selected upon finger lift. Loupe repositions below finger near top edge. Zoom is relative to current PDF zoom level.
+- **Translation icon**: When text is selected (via click/drag or loupe), a floating translate icon appears near the selection. Clicking it opens TranslationPanel (desktop sidebar or mobile bottom sheet). New selection auto-clears previous translation.
 - **SearchPanel accepts search results as props**: Receives `results`, `currentMatchIndex`, `onSelectResult`, `onNext`, `onPrev`, `onClose`, `query`, `onQueryChange` from parent (ReaderPage) instead of managing its own backend calls.
 - **ThumbnailSidebar uses react-pdf canvas**: Renders thumbnail pages using react-pdf's `<Page>` component with `scale={0.3}` or similar, applied to `canvas` rendering mode. Sidebar scrolls to current page, highlights it with purple border.
 - **PageRenderer uses react-pdf Page + TextLayer**: Renders a single PDF page using `<Page pageIndex={...}>` with `renderTextLayer={true}`. Passes `onRenderSuccess` to inform parent of actual page dimensions. Applies `theme-{style}` classes for sepia/night rendering.
-- **api.ts cleaned up**: Removed all page image/search functions (`getPageImageUrl`, `getPageThumbnailUrl`, `getPageTextOverlay`, `getPagesInfo`, `getBookPageCount`, `searchBook`, `getPageImageUrlWithToken`, `getPageThumbnailUrlWithToken`). Only Auth, Books (including `getBookFileUrl`), Translation, and Vocabulary remain.
-- **Deleted files**: `usePageImages.ts`, `useBackendSearch.ts` removed.
+- **api.ts**: No page image/search functions. Has `getWordPositions()` to fetch per-word bbox data. Only Auth, Books (including `getBookFileUrl`, `getWordPositions`), Translation, and Vocabulary remain.
+- **Deleted files**: `usePageImages.ts`, `useBackendSearch.ts`, `page_router.py`, PageImage schema/model/repo removed.
 - **Wider loading container**: PageRenderer container uses `max-w-[1400px]` to accommodate larger PDF pages.
 - **Vocabulary saves**: `TranslationPanel` has "Save to Vocabulary" button; `VocabularyPage` lists all saved words with phonetic/definition/context
 - **Vocabulary auto-check**: `useTranslation` auto-checks if word already exists on lookup; if found, shows "Already in vocabulary" state in TranslationPanel with edit button
@@ -237,17 +242,18 @@ infrastructure/web/api/v1/
 1. `POST /api/v1/books/register` (EPUB/PDF upload) → extract metadata + TOC → save Book + Chapters → parse first chapter → mark "ready"
 2. GET chapter → if not parsed, auto-parse from original file → save Paragraphs → mark chapter parsed
 3. `GET /api/v1/books/{id}/file` → serve original uploaded file (used by frontend react-pdf to load PDF via `getBookFileUrl()`)
-4. Frontend loads PDF via react-pdf `<Document>` → renders pages with Canvas + native TextLayer for text selection
-5. `POST /api/v1/books/{id}/translate-text` → arbitrary text selection → TranslationService
-6. `POST /api/v1/books/{id}/translate-word` → single-word lookup with context → returns phonetic, definition, sentence_context + translation
-7. `DELETE /api/v1/books/{id}` → delete from DB + remove file from disk
+4. `GET /api/v1/books/{id}/word-positions/{page_index}` → fetch per-word bounding boxes for a given page (used by MobileLoupe on mobile, directly from paragraphs table)
+5. Frontend loads PDF via react-pdf `<Document>` → renders pages with Canvas + native TextLayer for text selection
+6. `POST /api/v1/books/{id}/translate-text` → arbitrary text selection → TranslationService
+7. `POST /api/v1/books/{id}/translate-word` → single-word lookup with context → returns phonetic, definition, sentence_context + translation
+8. `DELETE /api/v1/books/{id}` → delete from DB + remove file from disk
 
 ### Database Schema (SQLAlchemy ORM)
 - **users**: id, email, hashed_password, created_at, updated_at
 - **books**: id, user_id (FK), title, author, language, file_path, total_chapters, total_pages (nullable, for PDF), status, created_at, updated_at
 - **chapters**: id, book_id (FK), title, spine_index, sequence_start, sequence_end, paragraph_count, is_parsed, created_at
-- **paragraphs**: id, book_id (FK), chapter_id (FK), content, index, page_index (nullable, for PDF), bbox_x0, bbox_y0, bbox_x1, bbox_y1 (nullable floats, PDF point coordinates), phonetic_transcription, created_at
-- **page_images**: id, book_id (FK), page_index, image_path, thumb_path, width, height, dpi, created_at
+- **paragraphs**: id, book_id (FK), chapter_id (FK), content, index, page_index (nullable, for PDF), bbox_x0, bbox_y0, bbox_x1, bbox_y1 (nullable floats, PDF point coordinates — one row per WORD for PDF), phonetic_transcription, created_at
+- **page_images**: REMOVED — table no longer exists
 - **translation_records**: id, user_id (FK), paragraph_id (FK), source_text, translated_text, provider, created_at
 
 ### Docker
@@ -257,7 +263,7 @@ infrastructure/web/api/v1/
 
 ---
 
-## Frontend Architecture (18 TypeScript/React files)
+## Frontend Architecture (20 TypeScript/React files)
 
 ### Tech Stack
 - **React 19**, **TypeScript**, **Vite**, **Tailwind CSS v4** (with `@import 'tailwindcss'` and `@theme` directive)
@@ -272,6 +278,8 @@ infrastructure/web/api/v1/
 - **Thumbnail sidebar** using react-pdf's `<Page>` with canvas rendering
 - **Mobile responsive**: window width detection, bottom sheet translation panel (slide-up animation), compact header, auto-hide sidebar
 - **PDF rendering**: client-side via react-pdf `<Page>` (Canvas + native TextLayer)
+- **Mobile loupe (magnifier)**: Circular magnifier activated by long-press on mobile, uses backend per-word bboxes for word detection, canvas `drawImage` for zoomed view
+- **Two selection sources**: Desktop uses native TextLayer selection; Mobile uses backend bbox coordinates + long-press detection via MobileLoupe
 
 ### File Map
 ```
@@ -281,13 +289,15 @@ frontend/src/
   index.css            → Tailwind import + @theme vars + glass utility + sepia/night theme classes
                          + body bg gradient (purple/dark), scrollbar styling, PDF viewer overrides,
                          page transition animations, search results styling,
-                         mobile bottom sheet animations, mobile PDF optimizations
+                         mobile bottom sheet animations, mobile PDF optimizations,
+                         loupe CSS (rounded window, zoomed canvas, highlighted word, resize handles)
   vite-env.d.ts        → Vite type declarations
 
   lib/
     api.ts             → Fetch-based API client (no Axios). Functions for all endpoints:
                           Auth: login, register, refreshAccessToken, logout, getMe
-                          Books: listBooks, getBookDetail, registerBook (multipart), deleteBook, getBookFileUrl (with ?token)
+                          Books: listBooks, getBookDetail, registerBook (multipart), deleteBook,
+                           getBookFileUrl (with ?token), getWordPositions (bookId, pageIndex)
                           Translation: translateSelectedText, translateWord
                           Vocabulary: listVocabularyWords, saveVocabularyWord, updateVocabularyWord,
                            checkVocabularyWord, deleteVocabularyWord
@@ -314,6 +324,13 @@ frontend/src/
     PageRenderer.tsx     → Renders a single PDF page using react-pdf's `<Page>` with
                            `renderTextLayer={true}` for native text selection.
                            Applies theme classes for sepia/night.
+    MobileLoupe.tsx      → Mobile magnifier component. Activated by long-press on PDF page.
+                           Shows circular zoomed view of canvas area under finger.
+                           Uses backend per-word bboxes to highlight word under touch point.
+                           Selects word on finger lift. Repositions near screen edges.
+                           Zoom is relative to current PDF zoom level.
+    TranslateIcon.tsx    → Floating translate icon that appears near selected text.
+                           Click triggers translation. Positioned at selection rect location.
 
   hooks/
     usePdfDocument.ts    → Loads PDF file as blob via getBookFileUrl(), uses pdfjs-dist's
@@ -326,6 +343,9 @@ frontend/src/
                            Auto-selects word on double-click via PDF.js TextLayer native behavior.
                            Returns selectedText, selectionRect, isWordClick, leftContext,
                            rightContext, clearSelection.
+    useWordPositions.ts   → Fetches per-word bbox data from backend for a given page.
+                           Returns { words, pageWidth, pageHeight, loading }.
+                           Used by MobileLoupe to determine word under finger.
     useTranslation.ts     → Manages translate(), streaming text, translation result, provider state,
                             handles phonetic, definition, sentence_context fields,
                             checks existing vocabulary words on lookup
@@ -345,13 +365,16 @@ frontend/src/
                            Ctrl+Wheel zoom, IntersectionObserver page tracking on rendered page divs,
                            floating page nav bottom-right, scroll/single/spread view modes,
                            mobile detection with bottom sheet translation (70vh max, slide-up animation),
-                           compact initial zoom (0.7), full-width pages on mobile
+                           compact initial zoom (0.7), full-width pages on mobile,
+                           MobileLoupe integration (long-press on mobile),
+                           TranslateIcon floating near selection,
+                           useWordPositions for backend bbox loading on mobile pages
 ```
 
 ### Key Patterns
 - **react-pdf (PDF.js) PDF reader**: Pages rendered client-side via Canvas + native TextLayer. Text selection is native browser behavior.
-- **Custom hooks** for all stateful logic (document loading, selection, translation, search, resize observer, progress)
-- **Separate components** for UI blocks (LoadingSpinner, ReaderHeader, TranslationPanel, ThumbnailSidebar, SearchPanel, PageRenderer)
+- **Custom hooks** for all stateful logic (document loading, selection, translation, search, resize observer, progress, word positions)
+- **Separate components** for UI blocks (LoadingSpinner, ReaderHeader, TranslationPanel, ThumbnailSidebar, SearchPanel, PageRenderer, MobileLoupe, TranslateIcon)
 - **AuthContext** via React context for global auth state + token management
 - **Fetch-based API client** (no Axios). Token injection via `Authorization: Bearer` header + `?token=` query param fallback for `<img>`/`<a>` tags
 - **Callback memoization** with `useCallback` for event handlers passed as props
@@ -370,6 +393,7 @@ frontend/src/
 - **Consistent color palette**: all pages share purple/dark gradient (`from-gray-900 via-purple-900 to-gray-900`) for a unified look
 - **`ViewMode` type** exported from ReaderHeader: `'scroll' | 'single' | 'spread'`
 - **Mobile responsive**: ReaderPage detects mobile (width < 768px), renders translation as bottom sheet with slide-up animation (CSS `.mobile-bottom-sheet`, `.mobile-bottom-sheet-backdrop`), compact header (12px height, icon-only sign out, no zoom/theme/jump controls), hides thumbnail sidebar and desktop sidebar, full-width PDF pages (`calc(100vw - 32px)`), initial zoom 0.7x
+- **MobileLoupe**: Long-press (500ms) activates circular magnifier (120px diameter). Canvas content captured via `canvas.toDataURL()` at 2x relative zoom. Word highlighted via backend bbox overlay. Touch point converted to PDF page coordinates using render dimensions. Loupe positioned above finger (or below near top edge). Finger lift selects word, clears loupe, triggers selection.
 
 ---
 

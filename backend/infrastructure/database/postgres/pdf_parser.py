@@ -1,319 +1,307 @@
+"""PDF parser using PyMuPDF (fitz). Same interface as EPUBParser.
+
+Extracts word-level bounding box coordinates for precise click-zone overlays.
+No page image rendering — the frontend renders PDF via PDF.js directly.
 """
-PDF Parser — lazy page-by-page parsing (same interface as EPUBParser).
-
-Uses PyMuPDF (fitz) to extract text and images from PDF files.
-Chapters are inferred from built-in TOC; falls back to scanning for
-headings or treating each page as a chapter.
-
-Supports server-side page rendering (render_page) and bbox-aware
-paragraph extraction (parse_page_with_positions) for the image+overlay
-reader approach.
-"""
-
 import base64
 import io
+import json
 import os
 import re
-from typing import List, Optional, Tuple
 
-import fitz
+from domain.entities.book import Book, Chapter, Paragraph
+from infrastructure.database.postgres.epub_parser import EPUBParser
+
+try:
+    import fitz  # PyMuPDF
+except ImportError:
+    fitz = None
 
 
-class PDFParser:
-    """Parser for PDF files with lazy page-by-page processing."""
+class PDFParser(EPUBParser):
+    """Parses PDF files using PyMuPDF (fitz).
+    
+    Implements the same interface as EPUBParser:
+    - lazy chapter-by-chapter parsing (chapters = pages in PDF context)
+    - image embedding as base64 <img> tags
+    - word-level bounding box extraction for transparent click-zone overlays
+    """
 
-    RENDER_DPI = 150
-    THUMB_DPI = 72
+    def __init__(self, file_path: str):
+        if fitz is None:
+            raise ImportError(
+                "PyMuPDF (fitz) is required for PDF parsing. "
+                "Install it with: pip install PyMuPDF"
+            )
+        self.file_path = file_path
+        self._doc: fitz.Document | None = None
+        self._page_count: int | None = None
 
-    def __init__(self) -> None:
-        self._doc_cache: dict[str, fitz.Document] = {}
+    @property
+    def doc(self) -> "fitz.Document":
+        if self._doc is None:
+            self._doc = fitz.open(self.file_path)
+            self._page_count = self._doc.page_count
+        return self._doc
 
-    def _get_doc(self, file_path: str) -> fitz.Document:
-        """Return cached Document or open it once."""
-        if file_path not in self._doc_cache:
-            self._doc_cache[file_path] = fitz.open(file_path)
-        return self._doc_cache[file_path]
+    def get_page_count(self) -> int:
+        """Return total number of pages."""
+        _ = self.doc  # ensure open
+        return self._page_count or 0
 
-    def close(self) -> None:
-        """Close all cached documents."""
-        for doc in self._doc_cache.values():
-            doc.close()
-        self._doc_cache.clear()
+    def get_total_pages(self) -> int:
+        """Alias for get_page_count()."""
+        return self.get_page_count()
 
-    @staticmethod
-    def _normalize_title(raw: str) -> str:
-        """Collapse whitespace in a chapter/section title."""
-        return re.sub(r"\s+", " ", raw).strip()
+    def get_page_dimensions(self, page_index: int) -> dict[str, float]:
+        """Return page width and height in points."""
+        page = self.doc[page_index]
+        rect = page.rect
+        return {"width": rect.width, "height": rect.height}
 
-    @staticmethod
-    def _is_chapter_heading(text: str) -> bool:
-        """Heuristic: detect if text looks like a chapter heading."""
-        if not text or len(text) > 200:
-            return False
-        t = text.strip()
-        patterns = [
-            r"^(chapter|part|section|lesson|unit)\s",
-            r"^[IVXLCDM]+\..*",
-            r"^\d+(\.\d+)*\s",
-        ]
-        return any(re.match(p, t, re.IGNORECASE) for p in patterns)
+    # ── Word-level extraction (new architecture) ────────────────────────
 
-    def extract_metadata(self, file_path: str) -> dict:
-        """Extract title, author, and language from the PDF metadata."""
-        doc = self._get_doc(file_path)
-        meta = doc.metadata
-        title = (meta.get("title") or "").strip()
-        author = (meta.get("author") or "").strip()
-        language = (meta.get("language") or "en").strip()
-        return {
-            "title": title or file_path.rsplit("/", 1)[-1].rsplit(".", 1)[0],
-            "author": author or "Unknown Author",
-            "language": language if len(language) <= 3 else "en",
-        }
+    def extract_words_with_positions(self, page_index: int) -> list[dict]:
+        """Extract every word on a page with its exact bounding box in PDF points.
 
-    def extract_toc(self, file_path: str) -> List[dict]:
+        PyMuPDF's get_text("words") returns tuples of:
+            (x0, y0, x1, y1, "word", block_no, line_no, word_no)
+
+        Returns:
+            list of dicts, each with:
+                - word: str (the text of the word)
+                - x0, y0, x1, y1: float (bounding box in PDF points)
+                - block_index: int
+                - line_index: int
+                - word_index: int
         """
-        Extract TOC as [{title, spine_index}, ...].
+        page = self.doc[page_index]
+        raw_words = page.get_text("words")
 
-        Tries the built-in PDF TOC first; falls back to scanning pages for
-        headings, and if still empty treats each page as a separate chapter.
+        results = []
+        for w in raw_words:
+            results.append({
+                "word": w[4],
+                "x0": round(w[0], 2),
+                "y0": round(w[1], 2),
+                "x1": round(w[2], 2),
+                "y1": round(w[3], 2),
+                "block_index": w[5] if len(w) > 5 else 0,
+                "line_index": w[6] if len(w) > 6 else 0,
+                "word_index": w[7] if len(w) > 7 else 0,
+            })
+
+        return results
+
+    def extract_words_for_all_pages(self) -> dict[int, list[dict]]:
+        """Extract word positions for all pages in the PDF.
+
+        Returns:
+            dict mapping page_index (int) → list of word position dicts
         """
-        doc = self._get_doc(file_path)
-        chapters: List[dict] = []
+        total = self.get_page_count()
+        result = {}
+        for i in range(total):
+            result[i] = self.extract_words_with_positions(i)
+        return result
 
-        # Try built-in TOC
-        toc = doc.get_toc()
-        if toc:
-            chapters = [
-                {"title": self._normalize_title(title), "spine_index": page - 1}
-                for level, title, page in toc
-                if level == 1
-            ]
-            if chapters:
-                return chapters
+    # ── Legacy methods kept for EPUB compatibility ──────────────────────
 
-        # Fallback: scan first 200 pages for headings
-        max_pages = min(len(doc), 200)
-        for page_num in range(max_pages):
-            page = doc[page_num]
-            text = page.get_text("text")
-            lines = [l.strip() for l in text.split("\n") if l.strip()]
-            for line in lines[:10]:
-                if self._is_chapter_heading(line):
-                    chapters.append(
-                        {"title": self._normalize_title(line), "spine_index": page_num}
-                    )
-                    break
+    def parse_page_with_positions(self, page_index: int) -> list[dict[str, any]]:
+        """Parse a page and return paragraphs with bounding box coordinates.
 
-        # Last resort: each page is a chapter
-        if not chapters:
-            chapters = [
-                {"title": f"Page {i + 1}", "spine_index": i}
-                for i in range(max_pages)
-            ]
-
-        return chapters
-
-    def _extract_image_block_html(
-        self, doc: fitz.Document, page: fitz.Page, block: dict
-    ) -> str:
-        """Return a base64 <img> tag for a dict-mode image block, or empty string."""
-        bbox = fitz.Rect(block["bbox"])
-        if (bbox.x1 - bbox.x0) < 20 or (bbox.y1 - bbox.y0) < 20:
-            return ""
-
-        # Try direct extraction from page images
-        images = page.get_images(full=True)
-        for img in images:
-            xref = img[0]
-            try:
-                base_img = doc.extract_image(xref)
-                b64 = base64.b64encode(base_img["image"]).decode()
-                return (
-                    f'<img src="data:image/{base_img["ext"]};base64,{b64}" '
-                    f'alt="Illustration" />'
-                )
-            except Exception:
+        This is used by the page router to provide text overlay data
+        for matching words to positions in the rendered image.
+        """
+        page = self.doc[page_index]
+        blocks = page.get_text("blocks")
+        
+        paragraphs = []
+        para_idx = 0
+        for block in blocks:
+            # block = (x0, y0, x1, y1, "lines", block_type, block_no)
+            x0, y0, x1, y1 = block[0], block[1], block[2], block[3]
+            
+            if len(block) < 5 or not isinstance(block[4], str):
                 continue
+            
+            text = block[4].strip()
+            if not text or text == "":
+                continue
+            
+            # Split block text into smaller paragraphs on actual line breaks
+            sub_blocks = text.split('\n')
+            
+            for sub_text in sub_blocks:
+                sub_text = sub_text.strip()
+                if not sub_text or len(sub_text) < 2:
+                    continue
+                
+                paragraphs.append({
+                    "content": sub_text,
+                    "page_index": page_index,
+                    "bbox_x0": x0,
+                    "bbox_y0": y0,
+                    "bbox_x1": x1,
+                    "bbox_y1": y1,
+                })
+                para_idx += 1
+        
+        return paragraphs
 
-        # Fallback: render the bounding box as a PNG
+    def extract_metadata(self) -> dict[str, str]:
+        """Extract PDF metadata."""
         try:
-            pix = page.get_pixmap(dpi=96, clip=bbox)
-            if pix.width > 20 and pix.height > 20:
-                png_bytes = pix.tobytes("png")
-                b64 = base64.b64encode(png_bytes).decode()
-                return f'<img src="data:image/png;base64,{b64}" alt="Illustration" />'
+            meta = self.doc.metadata
+            title = (meta.get("title") or "").strip()
+            author = (meta.get("author") or "").strip()
+            
+            # Fallback to filename if metadata is empty
+            if not title:
+                base = os.path.basename(self.file_path)
+                title = os.path.splitext(base)[0].replace("_", " ").replace("-", " ")
+            
+            return {
+                "title": title or "Unknown",
+                "author": author or "Unknown",
+                "language": "auto",  # PDF doesn't always have language metadata
+                "total_pages": self.get_page_count(),
+            }
         except Exception:
-            pass
+            base = os.path.basename(self.file_path)
+            title = os.path.splitext(base)[0]
+            return {"title": title, "author": "Unknown", "language": "auto", "total_pages": self.get_page_count()}
 
-        return ""
+    def extract_toc(self) -> list[dict[str, any]]:
+        """Extract table of contents."""
+        try:
+            toc = self.doc.get_toc()
+            if not toc:
+                return self._default_toc()
+            
+            return [
+                {
+                    "title": item[1],
+                    "level": item[0],
+                    "play_order": i,
+                    "href": f"page_{item[2] - 1}"  # 1-based to 0-based
+                }
+                for i, item in enumerate(toc)
+            ]
+        except Exception:
+            return self._default_toc()
 
-    @staticmethod
-    def _extract_text_from_block(block: dict) -> str:
-        """Extract combined text from a dict-mode text block."""
-        parts: List[str] = []
-        for line in block.get("lines", []):
-            spans = line.get("spans", [])
-            line_text = " ".join(s.get("text", "") for s in spans if s.get("text"))
-            parts.append(line_text)
+    def _default_toc(self) -> list[dict[str, any]]:
+        """Default TOC: one entry per page."""
+        n = self.get_page_count()
+        return [
+            {
+                "title": f"Page {i + 1}",
+                "level": 1,
+                "play_order": i,
+                "href": f"page_{i}"
+            }
+            for i in range(n)
+        ]
+
+    def parse_chapter(self, chapter_index: int) -> str:
+        """Parse a page as a chapter.
+        
+        Returns page text with inline base64 <img> tags for images.
+        """
+        page = self.doc[chapter_index]
+        
+        # Get text blocks
+        blocks = page.get_text("blocks")
+        
+        # Sort blocks by vertical then horizontal position
+        blocks = sorted(blocks, key=lambda b: (b[1], b[0]))
+        
+        parts = []
+        for block in blocks:
+            # block = (x0, y0, x1, y1, "text", block_type, block_no)
+            if len(block) < 6:
+                continue
+            
+            x0, y0, x1, y1 = block[0], block[1], block[2], block[3]
+            block_type = block[5] if len(block) > 5 else 0
+            
+            if block_type == 1:  # Image block
+                # Extract and embed the image
+                img_html = self._extract_image_html(page, (x0, y0, x1, y1))
+                if img_html:
+                    parts.append(img_html)
+            elif block_type == 0:  # Text block
+                text = block[4] if isinstance(block[4], str) else ""
+                if text.strip():
+                    # Wrap in paragraph tag
+                    parts.append(f'<p class="pdf-paragraph">{text.strip()}</p>')
+        
         return "\n".join(parts)
 
-    def parse_chapter(
-        self, file_path: str, spine_index: int, start_global_index: int = 0
-    ) -> List[Tuple[int, str]]:
+    def get_total_chapters(self) -> int:
+        """Return total number of pages (= chapters)."""
+        return self.get_page_count()
+
+    def _extract_image_html(self, page: "fitz.Page", bbox: tuple) -> str | None:
+        """Extract image from a region and return as HTML img tag with base64 data."""
+        try:
+            # Render the image region at higher resolution
+            zoom = 2.0
+            mat = fitz.Matrix(zoom, zoom)
+            clip = fitz.Rect(bbox)
+            pix = page.get_pixmap(matrix=mat, clip=clip)
+            
+            # Convert to base64 PNG
+            img_bytes = pix.tobytes("png")
+            b64 = base64.b64encode(img_bytes).decode("utf-8")
+            return f'<img src="data:image/png;base64,{b64}" class="pdf-image" />'
+        except Exception:
+            return '<p class="pdf-image-placeholder">[Image]</p>'
+
+    def close(self):
+        """Close the PDF document."""
+        if self._doc:
+            self._doc.close()
+            self._doc = None
+            self._page_count = None
+
+    def get_page_text(self, page_index: int) -> str:
+        """Get clean text content of a page."""
+        page = self.doc[page_index]
+        return page.get_text("text")
+
+    def search(self, query: str) -> list[dict[str, any]]:
+        """Full-text search across all pages.
+        
+        Returns list of matches with page index and context.
         """
-        Parse a single PDF page into (global_index, text) tuples.
-
-        Images are embedded as base64 <img> tags. Blocks are sorted top-to-bottom
-        then left-to-right by their bounding boxes.
-        """
-        doc = self._get_doc(file_path)
-
-        if spine_index < 0 or spine_index >= len(doc):
-            return []
-
-        page = doc[spine_index]
-        blocks = page.get_text("dict")["blocks"]
-        blocks.sort(key=lambda b: (b["bbox"][1], b["bbox"][0]))
-
-        paragraphs: List[Tuple[int, str]] = []
-        idx = start_global_index
-
-        for block in blocks:
-            if block.get("type", 0) == 1:  # image block
-                img_html = self._extract_image_block_html(doc, page, block)
-                if img_html:
-                    paragraphs.append((idx, img_html))
-                    idx += 1
-                continue
-
-            text = self._extract_text_from_block(block).strip()
-            if not text or len(text) <= 10:
-                continue
-
-            lines = text.split("\n")
-            meaningful = [l for l in lines if l.strip() and len(l.strip()) > 3]
-            if meaningful:
-                paragraphs.append((idx, " ".join(meaningful)))
-                idx += 1
-
-        return paragraphs
-
-    # ────────────────────────────────────────────────────────────────────────
-    # Methods for server-side page image rendering + bbox extraction
-    # ────────────────────────────────────────────────────────────────────────
-
-    def get_page_count(self, file_path: str) -> int:
-        """Return total number of pages in the PDF."""
-        doc = self._get_doc(file_path)
-        return len(doc)
-
-    def render_page(self, file_path: str, page_index: int, dpi: Optional[int] = None) -> bytes:
-        """
-        Render a single PDF page as a PNG image (bytes).
-
-        Args:
-            file_path: Path to the PDF file.
-            page_index: 0-based page index.
-            dpi: Resolution for rendering (defaults to RENDER_DPI=150).
-
-        Returns:
-            PNG image bytes.
-        """
-        doc = self._get_doc(file_path)
-        if page_index < 0 or page_index >= len(doc):
-            raise ValueError(f"Page index {page_index} out of range (0-{len(doc) - 1})")
-
-        page = doc[page_index]
-        pix = page.get_pixmap(dpi=dpi or self.RENDER_DPI)
-        return pix.tobytes("png")
-
-    def get_page_dimensions(self, file_path: str, page_index: int) -> Optional[Tuple[float, float]]:
-        """Get the width and height of a page in points."""
-        doc = self._get_doc(file_path)
-        if page_index < 0 or page_index >= len(doc):
-            return None
-        page = doc[page_index]
-        rect = page.rect
-        return (float(rect.width), float(rect.height))
-
-    def render_thumbnail(self, file_path: str, page_index: int) -> bytes:
-        """
-        Render a single PDF page as a small PNG thumbnail (bytes).
-
-        Args:
-            file_path: Path to the PDF file.
-            page_index: 0-based page index.
-
-        Returns:
-            PNG thumbnail bytes (72 DPI, max 320px wide).
-        """
-        doc = self._get_doc(file_path)
-        if page_index < 0 or page_index >= len(doc):
-            raise ValueError(f"Page index {page_index} out of range (0-{len(doc) - 1})")
-
-        page = doc[page_index]
-        # Determine zoom to constrain width to ~320px
-        rect = page.rect
-        zoom = min(320.0 / rect.width, 2.0)  # scale but cap at 2x
-        mat = fitz.Matrix(zoom, zoom)
-        pix = page.get_pixmap(matrix=mat)
-        return pix.tobytes("png")
-
-    def parse_page_with_positions(
-        self, file_path: str, spine_index: int, page_index: int, start_global_index: int = 0
-    ) -> List[Tuple[int, str, float, float, float, float]]:
-        """
-        Parse a single PDF page into paragraphs with bounding box coordinates.
-
-        Args:
-            file_path: Path to the PDF file.
-            spine_index: The spine index (page number in 1-chapter=1-page layout).
-            page_index: The global 0-based page index (same as spine_index for now).
-            start_global_index: Starting index for paragraph numbering.
-
-        Returns:
-            List of tuples: (global_index, text, bbox_x0, bbox_y0, bbox_x1, bbox_y1)
-
-        The bbox coordinates are in PDF page coordinate space (points).
-        The frontend will scale them by (rendered_width / page_rect.width).
-        """
-        doc = self._get_doc(file_path)
-        if spine_index < 0 or spine_index >= len(doc):
-            return []
-
-        page = doc[spine_index]
-        page_rect = page.rect  # page dimensions in points
-        blocks = page.get_text("dict")["blocks"]
-        blocks.sort(key=lambda b: (b["bbox"][1], b["bbox"][0]))
-
-        paragraphs: List[Tuple[int, str, float, float, float, float]] = []
-        idx = start_global_index
-
-        for block in blocks:
-            if block.get("type", 0) == 1:  # image block — skip for text overlay
-                continue
-
-            text = self._extract_text_from_block(block).strip()
-            if not text or len(text) <= 10:
-                continue
-
-            lines = text.split("\n")
-            meaningful = [l for l in lines if l.strip() and len(l.strip()) > 3]
-            if not meaningful:
-                continue
-
-            combined = " ".join(meaningful)
-            bbox = block["bbox"]  # [x0, y0, x1, y1] in PDF points
-
-            paragraphs.append((
-                idx,
-                combined,
-                float(bbox[0]),
-                float(bbox[1]),
-                float(bbox[2]),
-                float(bbox[3]),
-            ))
-            idx += 1
-
-        return paragraphs
+        results = []
+        query_lower = query.lower()
+        
+        for page_idx in range(self.get_page_count()):
+            page = self.doc[page_idx]
+            text = page.get_text("text")
+            text_lower = text.lower()
+            
+            idx = 0
+            while True:
+                pos = text_lower.find(query_lower, idx)
+                if pos == -1:
+                    break
+                
+                # Get context (up to 100 chars before and after)
+                ctx_start = max(0, pos - 50)
+                ctx_end = min(len(text), pos + len(query) + 50)
+                context = text[ctx_start:ctx_end].strip().replace("\n", " ")
+                
+                results.append({
+                    "page_index": page_idx,
+                    "position": pos,
+                    "context": f"...{context}...",
+                    "match_text": text[pos:pos + len(query)]
+                })
+                
+                idx = pos + 1
+        
+        return results

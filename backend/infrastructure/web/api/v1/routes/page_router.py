@@ -1,51 +1,64 @@
-"""Page routes: serve rendered page images + text overlay for the image+overlay reader.
+"""Page routes: word-level bounding box coordinates for the clickable overlay reader.
 
-For PDF books, the backend renders each page as a PNG image on demand, caches it,
-and serves both the image and the per-paragraph bbox data so the frontend can overlay
-a transparent clickable text layer for word selection and translation.
+For PDF books, the backend extracts word-level positions (bounding boxes) via PyMuPDF
+during lazy parsing and serves them on demand. The frontend renders PDF via PDF.js
+and uses these coordinates to place transparent click zones over each word.
+
+No server-side image rendering — zero caching of page images.
 """
 import logging
-import os
-import uuid
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from fastapi.responses import Response
 from sqlalchemy.ext.asyncio import AsyncSession
+from pydantic import BaseModel
 
-from config.settings import settings
-from domain.entities.book import Book, PageImage, Paragraph
 from domain.entities.user import User
 from infrastructure.database.postgres.pdf_parser import PDFParser
 from infrastructure.database.postgres.repositories import (
     BookRepositoryImpl,
-    ChapterRepositoryImpl,
-    PageImageRepositoryImpl,
-    ParagraphRepositoryImpl,
+    WordPositionRepositoryImpl,
 )
 from infrastructure.database.postgres.session import get_session
 from infrastructure.web.api.v1.dependencies import get_current_user
-from infrastructure.web.api.v1.schemas.book_schemas import (
-    PageImageResponse,
-    PageInfoResponse,
-    ParagraphResponse,
-    SearchRequest,
-    SearchResponse,
-    SearchResultItem,
-)
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
-# Directory to cache rendered page images
-CACHE_DIR = Path(settings.PAGE_IMAGE_CACHE_DIR) if hasattr(settings, "PAGE_IMAGE_CACHE_DIR") else Path("uploads/page_cache")
-CACHE_DIR.mkdir(parents=True, exist_ok=True)
+
+# ── Schemas ──────────────────────────────────────────────────────────────
+
+
+class WordPositionResponse(BaseModel):
+    """A single word with its bounding box in PDF point coordinates."""
+    word: str
+    x0: float
+    y0: float
+    x1: float
+    y1: float
+    word_index: int
+    line_index: int
+    block_index: int
+
+
+class WordPositionsPageResponse(BaseModel):
+    """All word positions for one page, plus page dimensions for scaling."""
+    book_id: int
+    page_index: int
+    page_width: float
+    page_height: float
+    words: list[WordPositionResponse]
+
+
+class PageCountResponse(BaseModel):
+    book_id: int
+    total_pages: int
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────
 
 
-async def _get_owned_book(book_id: int, user_id: int, db: AsyncSession) -> Book:
+async def _get_owned_book(book_id: int, user_id: int, db: AsyncSession):
     """Fetch a book and verify ownership."""
     repo = BookRepositoryImpl(db)
     book = await repo.get_book_by_id(book_id)
@@ -54,211 +67,108 @@ async def _get_owned_book(book_id: int, user_id: int, db: AsyncSession) -> Book:
     return book
 
 
-def _paragraph_to_response(p: Paragraph) -> ParagraphResponse:
-    return ParagraphResponse(
-        id=p.id, book_id=p.book_id, chapter_id=p.chapter_id,
-        content=p.content, index=p.index,
-        page_index=p.page_index,
-        bbox_x0=p.bbox_x0, bbox_y0=p.bbox_y0,
-        bbox_x1=p.bbox_x1, bbox_y1=p.bbox_y1,
-        phonetic_transcription=p.phonetic_transcription,
-    )
+async def _ensure_page_words_indexed(
+    db: AsyncSession, book_id: int, page_index: int, file_path: str,
+) -> None:
+    """Lazy-index word positions for a page if not already done."""
+    wp_repo = WordPositionRepositoryImpl(db)
+    if await wp_repo.page_has_positions(book_id, page_index):
+        return
 
-
-async def _ensure_pdf_parsed(db: AsyncSession, book: Book) -> int:
-    """
-    Parse all unparsed chapters/pages of a PDF book into paragraphs with bbox data.
-
-    Returns total page count.
-    """
-    pdf_parser = PDFParser()
+    parser = PDFParser(file_path)
     try:
-        total_pages = pdf_parser.get_page_count(book.file_path)
-        chapter_repo = ChapterRepositoryImpl(db)
-        chapters = await chapter_repo.get_chapters_by_book(book.id)
+        raw_words = parser.extract_words_with_positions(page_index)
+        if not raw_words:
+            return
 
-        para_repo = ParagraphRepositoryImpl(db)
+        from infrastructure.database.postgres import models as orm
 
-        for chapter in chapters:
-            if chapter.is_parsed:
-                continue
-
-            # For PDF, each chapter is one page. Parse with bbox positions.
-            blocks = pdf_parser.parse_page_with_positions(
-                book.file_path,
-                spine_index=chapter.spine_index,
-                page_index=chapter.spine_index,
+        positions = [
+            orm.WordPosition(
+                book_id=book_id,
+                page_index=page_index,
+                word=w["word"],
+                x0=w["x0"],
+                y0=w["y0"],
+                x1=w["x1"],
+                y1=w["y1"],
+                word_index=w["word_index"],
+                line_index=w["line_index"],
+                block_index=w["block_index"],
             )
-
-            paragraphs = [
-                Paragraph(
-                    book_id=book.id,
-                    chapter_id=chapter.id,
-                    content=content,
-                    index=idx,
-                    page_index=chapter.spine_index,
-                    bbox_x0=x0, bbox_y0=y0, bbox_x1=x1, bbox_y1=y1,
-                )
-                for idx, content, x0, y0, x1, y1 in blocks
-            ]
-
-            if paragraphs:
-                await para_repo.add_paragraphs(paragraphs)
-
-            await chapter_repo.mark_chapter_parsed(
-                chapter.id, 0, len(paragraphs) - 1, len(paragraphs)
-            )
-            logger.info(
-                "Parsed %d paragraphs for chapter %d (page %d)",
-                len(paragraphs), chapter.id, chapter.spine_index,
-            )
-
-        return total_pages
+            for w in raw_words
+        ]
+        await wp_repo.bulk_save(positions)
+        logger.info(
+            "Indexed %d word positions for book %d page %d",
+            len(positions), book_id, page_index,
+        )
     finally:
-        pdf_parser.close()
+        parser.close()
 
 
 # ── Endpoints ────────────────────────────────────────────────────────────
 
 
-@router.get("/{book_id}/pages/{page_index}/image", response_class=Response)
-async def get_page_image(
+@router.get("/{book_id}/word-positions/{page_index}", response_model=WordPositionsPageResponse)
+async def get_word_positions(
     book_id: int,
     page_index: int,
     db: AsyncSession = Depends(get_session),
     current_user: User = Depends(get_current_user),
 ):
-    """Serve a rendered PDF page as a PNG image.
+    """Get word-level bounding box positions for a page.
 
-    Caches the rendered image on first access. Subsequent requests return the cached file.
+    Extract is lazy: runs on first access, then cached in the database.
+    The frontend uses these coordinates to place transparent click zones
+    over the PDF.js rendered page.
     """
     book = await _get_owned_book(book_id, current_user.id, db)
 
-    # Check cache first
-    cache_key = f"{book_id}_{page_index}.png"
-    cache_path = CACHE_DIR / cache_key
+    ext = Path(book.file_path).suffix.lower()
+    if ext != ".pdf":
+        raise HTTPException(status_code=400, detail="Word positions only available for PDF books")
 
-    if cache_path.exists():
-        return Response(content=cache_path.read_bytes(), media_type="image/png")
+    # Lazy parse word positions
+    await _ensure_page_words_indexed(db, book_id, page_index, book.file_path)
 
-    # Render + cache
-    parser = PDFParser()
+    # Fetch from DB
+    wp_repo = WordPositionRepositoryImpl(db)
+    rows = await wp_repo.get_by_page(book_id, page_index)
+
+    # Get page dimensions
+    parser = PDFParser(book.file_path)
     try:
-        image_bytes = parser.render_page(book.file_path, page_index)
-        cache_path.write_bytes(image_bytes)
-        return Response(content=image_bytes, media_type="image/png")
-    except ValueError as exc:
-        raise HTTPException(status_code=404, detail=str(exc))
-    except Exception as exc:
-        logger.error("Failed to render page %d of book %d: %s", page_index, book_id, exc)
-        raise HTTPException(status_code=500, detail="Failed to render page")
-    finally:
-        parser.close()
-
-
-@router.get("/{book_id}/thumbnails/{page_index}", response_class=Response)
-async def get_page_thumbnail(
-    book_id: int,
-    page_index: int,
-    db: AsyncSession = Depends(get_session),
-    current_user: User = Depends(get_current_user),
-):
-    """Serve a small thumbnail of a PDF page."""
-    book = await _get_owned_book(book_id, current_user.id, db)
-
-    cache_key = f"{book_id}_{page_index}_thumb.png"
-    cache_path = CACHE_DIR / cache_key
-
-    if cache_path.exists():
-        return Response(content=cache_path.read_bytes(), media_type="image/png")
-
-    parser = PDFParser()
-    try:
-        thumb_bytes = parser.render_thumbnail(book.file_path, page_index)
-        cache_path.write_bytes(thumb_bytes)
-        return Response(content=thumb_bytes, media_type="image/png")
-    except ValueError as exc:
-        raise HTTPException(status_code=404, detail=str(exc))
-    except Exception as exc:
-        logger.error("Failed to render thumbnail page %d of book %d: %s", page_index, book_id, exc)
-        raise HTTPException(status_code=500, detail="Failed to render thumbnail")
-    finally:
-        parser.close()
-
-
-@router.get("/{book_id}/pages/{page_index}/text-overlay", response_model=PageInfoResponse)
-async def get_page_text_overlay(
-    book_id: int,
-    page_index: int,
-    db: AsyncSession = Depends(get_session),
-    current_user: User = Depends(get_current_user),
-):
-    """Get text overlay data for a PDF page.
-
-    Returns the paragraphs with bbox coordinates for the given page,
-    along with the page dimensions so the frontend can scale the overlay.
-    """
-    book = await _get_owned_book(book_id, current_user.id, db)
-
-    # Ensure PDF is parsed
-    await _ensure_pdf_parsed(db, book)
-
-    para_repo = ParagraphRepositoryImpl(db)
-    paragraphs = await para_repo.get_paragraphs_by_page(book_id, page_index)
-
-    # Estimate page dimensions from the rendered image (cached)
-    parser = PDFParser()
-    try:
-        dims = parser.get_page_dimensions(book.file_path, page_index)
-        if dims:
-            width, height = int(dims[0]), int(dims[1])
-        else:
-            width, height = 612, 792
+        dims = parser.get_page_dimensions(page_index)
+        page_width = dims["width"]
+        page_height = dims["height"]
     except Exception:
-        # Fallback dimensions
-        width = 612  # US Letter points
-        height = 792
+        page_width, page_height = 612.0, 792.0
     finally:
         parser.close()
 
-    return PageInfoResponse(
+    return WordPositionsPageResponse(
         book_id=book_id,
         page_index=page_index,
-        width=width,
-        height=height,
-        dpi=150,
-        paragraphs=[_paragraph_to_response(p) for p in paragraphs],
+        page_width=page_width,
+        page_height=page_height,
+        words=[
+            WordPositionResponse(
+                word=row.word,
+                x0=row.x0,
+                y0=row.y0,
+                x1=row.x1,
+                y1=row.y1,
+                word_index=row.word_index,
+                line_index=row.line_index,
+                block_index=row.block_index,
+            )
+            for row in rows
+        ],
     )
 
 
-@router.get("/{book_id}/pages-info", response_model=list[PageImageResponse])
-async def get_pages_info(
-    book_id: int,
-    db: AsyncSession = Depends(get_session),
-    current_user: User = Depends(get_current_user),
-):
-    """Get image URLs for all pages of a PDF book, for preloading."""
-    book = await _get_owned_book(book_id, current_user.id, db)
-
-    parser = PDFParser()
-    try:
-        total_pages = parser.get_page_count(book.file_path)
-        return [
-            PageImageResponse(
-                book_id=book_id,
-                page_index=i,
-                image_url=f"/api/v1/pages/{book_id}/pages/{i}/image",
-                thumb_url=f"/api/v1/pages/{book_id}/thumbnails/{i}",
-                width=612,
-                height=792,
-            )
-            for i in range(total_pages)
-        ]
-    finally:
-        parser.close()
-
-
-@router.get("/{book_id}/page-count", response_model=dict)
+@router.get("/{book_id}/page-count", response_model=PageCountResponse)
 async def get_page_count(
     book_id: int,
     db: AsyncSession = Depends(get_session),
@@ -267,32 +177,9 @@ async def get_page_count(
     """Get the total number of pages in a PDF book."""
     book = await _get_owned_book(book_id, current_user.id, db)
 
-    parser = PDFParser()
+    parser = PDFParser(book.file_path)
     try:
-        total_pages = parser.get_page_count(book.file_path)
-        return {"book_id": book_id, "total_pages": total_pages}
+        total_pages = parser.get_page_count()
+        return PageCountResponse(book_id=book_id, total_pages=total_pages)
     finally:
         parser.close()
-
-
-@router.get("/{book_id}/search", response_model=SearchResponse)
-async def search_book(
-    book_id: int,
-    query: str,
-    db: AsyncSession = Depends(get_session),
-    current_user: User = Depends(get_current_user),
-):
-    """Search paragraphs within a book (full-text, case-insensitive)."""
-    book = await _get_owned_book(book_id, current_user.id, db)
-
-    # Ensure PDF is fully parsed
-    await _ensure_pdf_parsed(db, book)
-
-    para_repo = ParagraphRepositoryImpl(db)
-    results = await para_repo.search_paragraphs(book_id, query)
-
-    return SearchResponse(
-        query=query,
-        total_results=len(results),
-        results=[SearchResultItem(**r) for r in results],
-    )

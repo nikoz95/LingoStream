@@ -74,19 +74,25 @@ class Paragraph(Base):
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
 
-class PageImage(Base):
-    """Rendered page images for PDF books (server-side rendered, no PDF.js needed)."""
-    __tablename__ = "page_images"
+class WordPosition(Base):
+    """Word-level bounding box positions for PDF pages.
+
+    Extracted by PyMuPDF during lazy parsing. Each row = one word on one page,
+    with its exact bounding box in PDF points coordinate space.
+    """
+    __tablename__ = "word_positions"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     book_id = Column(Integer, ForeignKey("books.id"), nullable=False, index=True)
     page_index = Column(Integer, nullable=False)
-    image_path = Column(String(1000), nullable=False)
-    thumb_path = Column(String(1000), nullable=False)
-    width = Column(Integer, nullable=False)
-    height = Column(Integer, nullable=False)
-    dpi = Column(Integer, default=150)
-    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    word = Column(String(500), nullable=False)
+    x0 = Column(Float, nullable=False)
+    y0 = Column(Float, nullable=False)
+    x1 = Column(Float, nullable=False)
+    y1 = Column(Float, nullable=False)
+    word_index = Column(Integer, default=0)
+    line_index = Column(Integer, default=0)
+    block_index = Column(Integer, default=0)
 
 
 class TranslationRecord(Base):

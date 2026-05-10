@@ -22,6 +22,7 @@ MIGRATIONS = [
     "ALTER TABLE paragraphs ADD COLUMN IF NOT EXISTS bbox_x1 DOUBLE PRECISION",
     "ALTER TABLE paragraphs ADD COLUMN IF NOT EXISTS bbox_y1 DOUBLE PRECISION",
     "ALTER TABLE books ADD COLUMN IF NOT EXISTS total_pages INTEGER DEFAULT 0",
+    "DROP TABLE IF EXISTS page_images",
 ]
 
 
@@ -60,6 +61,6 @@ def create_app() -> FastAPI:
 
     @app.get("/")
     async def root():
-        return {"message": "LingoStream v5.4 — Image+Overlay Reader Ready 🚀"}
+        return {"message": "LingoStream v6.0 — PDF.js + Word Click Zones Reader"}
 
     return app

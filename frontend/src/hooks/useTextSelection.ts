@@ -20,8 +20,12 @@ export interface SelectionInfo {
   bookId: number;
 }
 
-/** CSS class that react-pdf uses for its TextContent overlay div */
-const TEXT_LAYER_SELECTOR = '.react-pdf__Page__textContent';
+/**
+ * CSS selector for the custom word-level click zones.
+ * Since we use backend-extracted coordinates (not react-pdf's TextLayer),
+ * selection works on invisible text nodes inside .pdf-word-zone spans.
+ */
+const TEXT_LAYER_SELECTOR = '.pdf-word-zone';
 
 export function useTextSelection() {
   const [selectedText, setSelectedText] = useState('');

@@ -1,23 +1,28 @@
 /**
- * PageRenderer — renders a single PDF page using react-pdf.
- * Uses custom text overlay (via pdfjs-dist getTextContent) instead of
- * react-pdf's built-in TextLayer, because the built-in TextLayer CSS
- * often fails to render/position text spans correctly.
+ * PageRenderer — renders a single PDF page using react-pdf canvas.
  *
- * Each text item from getTextContent is rendered as a positioned <span>
- * so that the browser's native selection works properly.
+ * A transparent click-zone overlay is positioned over each word using
+ * backend-extracted bounding box coordinates (PyMuPDF). No invisible
+ * text nodes — selection is coordinate-based via useClickSelection hook
+ * which maps mouse/touch viewport coordinates to PDF bboxes.
  */
 import { useState, useCallback, memo, useRef, useEffect } from 'react';
 import { Page } from 'react-pdf';
 import type { PDFDocumentProxy } from 'pdfjs-dist';
-import { usePageTextContent } from '../hooks/usePageTextContent';
+import type { WordPositionsPageResponse, WordPositionResponse } from '../lib/api';
 import LoadingSpinner from './LoadingSpinner';
 
 interface PageRendererProps {
   pdf: PDFDocumentProxy | null;
-  pageIndex: number; // 0-based internally, react-pdf uses pageNumber (1-based)
+  pageIndex: number;
   width: number;
   className?: string;
+  /** Backend-extracted word positions for click-zone overlays */
+  wordPositions: WordPositionsPageResponse | null;
+  /** Whether word positions are still loading */
+  wordPositionsLoading: boolean;
+  /** Fired when PDF renders successfully — gives actual rendered dims */
+  onRender?: (widthPx: number, heightPx: number) => void;
 }
 
 const PageRenderer = memo(function PageRenderer({
@@ -25,6 +30,9 @@ const PageRenderer = memo(function PageRenderer({
   pageIndex,
   width,
   className = '',
+  wordPositions,
+  wordPositionsLoading,
+  onRender,
 }: PageRendererProps) {
   const pageNumber = pageIndex + 1;
   const [pageLoading, setPageLoading] = useState(true);
@@ -34,29 +42,28 @@ const PageRenderer = memo(function PageRenderer({
   const [pageScale, setPageScale] = useState(1);
   const containerRef = useRef<HTMLDivElement>(null);
 
-  // Extract text content with bounding boxes
-  const { items, loading: textLoading } = usePageTextContent(pdf, pageIndex);
-
   const handleLoadSuccess = useCallback((page: any) => {
     setPageLoading(false);
     setPageError(false);
-    // Get the actual rendered dimensions
     const viewport = page.getViewport({ scale: 1 });
     setPageWidthPx(viewport.width);
     setPageHeightPx(viewport.height);
-  }, []);
+    onRender?.(viewport.width, viewport.height);
+  }, [onRender]);
 
   const handleLoadError = useCallback(() => {
     setPageLoading(false);
     setPageError(true);
   }, []);
 
-  // Compute scale from the rendered page width vs original width
+  // Compute scale from rendered page width vs original PDF points width
   useEffect(() => {
     if (pageWidthPx > 0 && width > 0) {
       setPageScale(width / pageWidthPx);
     }
   }, [pageWidthPx, width]);
+
+  const isUpdating = pageLoading || wordPositionsLoading;
 
   if (!pdf) {
     return <LoadingSpinner message="Loading PDF..." />;
@@ -65,9 +72,12 @@ const PageRenderer = memo(function PageRenderer({
   return (
     <div ref={containerRef} className={`relative ${className}`}>
       {/* Loading state */}
-      {pageLoading && (
+      {isUpdating && (
         <div className="absolute inset-0 flex items-center justify-center z-10">
-          <LoadingSpinner message={`Loading page ${pageNumber}...`} light />
+          <LoadingSpinner
+            message={pageLoading ? `Loading page ${pageNumber}...` : 'Loading word positions...'}
+            light
+          />
         </div>
       )}
 
@@ -92,10 +102,13 @@ const PageRenderer = memo(function PageRenderer({
         className="pdf-page"
       />
 
-      {/* Custom text overlay — positioned spans matching PDF text positions */}
-      {!textLoading && items.length > 0 && pageScale > 0 && (
+      {/* Word-level click zones from backend coordinates */}
+      {!isUpdating &&
+        wordPositions &&
+        wordPositions.words.length > 0 &&
+        pageScale > 0 && (
         <div
-          className="pdf-custom-textlayer"
+          className="pdf-word-overlay"
           style={{
             position: 'absolute',
             top: 0,
@@ -106,40 +119,51 @@ const PageRenderer = memo(function PageRenderer({
             overflow: 'hidden',
           }}
         >
-          {items.map((item, idx) => (
-            <span
-              key={`txt-${idx}`}
-              className="pdf-text-item"
-              data-text={item.str}
-              style={{
-                position: 'absolute',
-                left: `${item.x * pageScale}px`,
-                top: `${item.y * pageScale}px`,
-                fontSize: `${item.h * pageScale}px`,
-                lineHeight: `${item.h * pageScale}px`,
-                whiteSpace: 'pre',
-                pointerEvents: 'auto',
-                cursor: 'text',
-                color: 'transparent',
-                // Slight opacity so user can see the text cursor position
-                background: 'transparent',
-                userSelect: 'text',
-                WebkitUserSelect: 'text',
-                msUserSelect: 'text',
-                MozUserSelect: 'text',
-              }}
-            >
-              {item.str}
-            </span>
-          ))}
+          {wordPositions.words.map((wp: WordPositionResponse, idx: number) => {
+            // Transform PDF points to CSS pixels
+            const x = wp.x0 * pageScale;
+            const y = wp.y0 * pageScale;
+            const w = (wp.x1 - wp.x0) * pageScale;
+            const h = (wp.y1 - wp.y0) * pageScale;
+
+            // Skip zero-size zones
+            if (w <= 0 || h <= 0) return null;
+
+            // Selection highlight: check if this word is part of the currently selected text
+            // (handled via CSS class from useClickSelection)
+            return (
+              <span
+                key={`wz-${idx}`}
+                className="pdf-word-zone"
+                data-word={wp.word}
+                data-word-index={wp.word_index}
+                data-line-index={wp.line_index}
+                data-block-index={wp.block_index}
+                data-page-index={pageIndex}
+                style={{
+                  position: 'absolute',
+                  left: `${x}px`,
+                  top: `${y}px`,
+                  width: `${w}px`,
+                  height: `${h}px`,
+                  pointerEvents: 'auto',
+                  cursor: 'pointer',
+                  background: 'transparent',
+                }}
+              >
+              </span>
+            );
+          })}
         </div>
       )}
 
-      {/* TextLayer fallback message if no items on a loaded page */}
-      {!pageLoading && !textLoading && items.length === 0 && !pageError && (
-        <div
-          className="absolute bottom-2 right-2 text-[10px] text-white/20 pointer-events-none"
-        >
+      {/* No-text indicator */}
+      {!pageLoading &&
+        !wordPositionsLoading &&
+        wordPositions &&
+        wordPositions.words.length === 0 &&
+        !pageError && (
+        <div className="absolute bottom-2 right-2 text-[10px] text-white/20 pointer-events-none">
           (no selectable text)
         </div>
       )}

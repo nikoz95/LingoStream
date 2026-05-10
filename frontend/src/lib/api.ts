@@ -322,3 +322,42 @@ export async function deleteVocabularyWord(wordId: number): Promise<void> {
   return request(`/vocabulary/words/${wordId}`, { method: 'DELETE' });
 }
 
+// ── Word Position API (PDF click overlays) ──
+
+export interface WordPositionResponse {
+  word: string;
+  x0: number;
+  y0: number;
+  x1: number;
+  y1: number;
+  word_index: number;
+  line_index: number;
+  block_index: number;
+}
+
+export interface WordPositionsPageResponse {
+  book_id: number;
+  page_index: number;
+  page_width: number;
+  page_height: number;
+  words: WordPositionResponse[];
+}
+
+export interface PageCountResponse {
+  book_id: number;
+  total_pages: number;
+}
+
+export async function getWordPositions(
+  bookId: number,
+  pageIndex: number,
+): Promise<WordPositionsPageResponse> {
+  return request<WordPositionsPageResponse>(
+    `/pages/${bookId}/word-positions/${pageIndex}`
+  );
+}
+
+export async function getBookPageCount(bookId: number): Promise<PageCountResponse> {
+  return request<PageCountResponse>(`/pages/${bookId}/page-count`);
+}
+

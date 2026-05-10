@@ -4,13 +4,15 @@ import { useAuth } from '../lib/auth';
 import { saveVocabularyWord } from '../lib/api';
 import { usePdfDocument } from '../hooks/usePdfDocument';
 import { useContainerWidth } from '../hooks/useContainerWidth';
-import { useTextSelection } from '../hooks/useTextSelection';
+import { useClickSelection } from '../hooks/useClickSelection';
 import { useTranslation } from '../hooks/useTranslation';
 import { useReadingProgress } from '../hooks/useReadingProgress';
 import { usePdfSearch } from '../hooks/usePdfSearch';
+import { useWordPositions } from '../hooks/useWordPositions';
 import ReaderHeader from '../components/ReaderHeader';
 import type { ViewMode } from '../components/ReaderHeader';
 import LoadingSpinner from '../components/LoadingSpinner';
+import MobileLoupe from '../components/MobileLoupe';
 import TranslationPanel from '../components/TranslationPanel';
 import ThumbnailSidebar from '../components/ThumbnailSidebar';
 import SearchPanel from '../components/SearchPanel';
@@ -26,6 +28,16 @@ export default function ReaderPage() {
   const navigate = useNavigate();
   const { logout } = useAuth();
 
+  // ── Core refs ──
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
+  const spreadContainerRef = useRef<HTMLDivElement>(null);
+  const pageNumberRefs = useRef<Map<number, HTMLDivElement>>(new Map());
+  const isScrollingRef = useRef(false);
+  const wordPositionsLoadingRef = useRef<Set<number>>(new Set());
+
+  // ── Word positions cache ──
+  const [wordPositionsCache, setWordPositionsCache] = useState<Record<number, any>>({});
+
   // ── PDF Document ──
   const {
     book: pdfBook,
@@ -37,16 +49,19 @@ export default function ReaderPage() {
     onLoadError,
   } = usePdfDocument(bookId);
 
+  // ── Coordinate-based click/drag selection ──
   const {
     selectedText,
     selectionRect,
     isWordClick,
-    isLongPress,
     leftContext,
     rightContext,
     clearSelection,
-    resetLongPress,
-  } = useTextSelection();
+    selectWord,
+  } = useClickSelection({
+    containerRef: scrollContainerRef,
+    wordPositionsCache,
+  });
 
   const {
     translating,
@@ -94,11 +109,34 @@ export default function ReaderPage() {
   const effectiveSidebarVisible = isMobile ? false : showSidebar;
 
   const { ref: containerWidthRef, width: containerWidth } = useContainerWidth();
-  const scrollContainerRef = useRef<HTMLDivElement>(null);
-  const pageElementsRef = useRef<Map<number, HTMLDivElement>>(new Map());
-  const spreadContainerRef = useRef<HTMLDivElement>(null);
-  const pageNumberRefs = useRef<Map<number, HTMLDivElement>>(new Map());
-  const isScrollingRef = useRef(false);
+
+  // ── Word positions (backend-extracted click zones) ──
+  const {
+    getPositions: getWordPositionsForPage,
+    loading: wordPositionsLoading,
+    error: wordPositionsError,
+    preloadRange: preloadWordPositions,
+    clearCache: clearWordPositionsCache,
+  } = useWordPositions(bookId ? Number(bookId) : null);
+
+  // Fetch word positions for the current page + buffer
+  useEffect(() => {
+    if (!numPages || !bookId) return;
+    const start = Math.max(0, currentPage - 2);
+    const end = Math.min(numPages, currentPage + 3);
+    for (let i = start; i <= end; i++) {
+      const pageIdx = i - 1;
+      if (!wordPositionsCache[pageIdx] && !wordPositionsLoadingRef.current.has(pageIdx)) {
+        wordPositionsLoadingRef.current.add(pageIdx);
+        getWordPositionsForPage(pageIdx).then(data => {
+          wordPositionsLoadingRef.current.delete(pageIdx);
+          if (data) {
+            setWordPositionsCache(prev => ({ ...prev, [pageIdx]: data }));
+          }
+        });
+      }
+    }
+  }, [currentPage, numPages, bookId, getWordPositionsForPage, wordPositionsCache]);
 
   // ── Dark mode detection ──
   useEffect(() => {
@@ -308,15 +346,6 @@ export default function ReaderPage() {
     }
   }, [selectionRect, selectedText]);
 
-  // ── Auto-translate on long-press (mobile touch) ──
-  useEffect(() => {
-    if (isLongPress && selectedText) {
-      translate(selectedText, true, leftContext, rightContext);
-      setTranslateIconPos(null);
-      setShowMobileTranslation(true);
-      resetLongPress();
-    }
-  }, [isLongPress]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Callbacks ──
   const handleTranslate = useCallback(() => {
@@ -406,6 +435,20 @@ export default function ReaderPage() {
     error: searchError,
   };
 
+  // ── MobileLoupe word selected handler ──
+  const handleLoupeWordSelected = useCallback((word: string, pageX: number, pageY: number) => {
+    // Set the word as selected via useClickSelection's selectWord
+    // Find which page the point is on
+    const elements = document.elementsFromPoint(pageX, pageY);
+    const pageEl = elements.find(el => el.closest('[data-page-number]'))?.closest('[data-page-number]') as HTMLElement | undefined;
+    const pageIndex = pageEl ? Number(pageEl.dataset.pageNumber) - 1 : 0;
+
+    selectWord(word, pageIndex, pageX, pageY);
+    translate(word, true, '', '');
+    setTranslateIconPos(null);
+    setShowMobileTranslation(true);
+  }, [translate, selectWord]);
+
   // ── Render functions ──
   const renderPage = (pageNum: number) => {
     const active = isCurrentPage(pageNum);
@@ -432,6 +475,8 @@ export default function ReaderPage() {
           pdf={pdfDocument}
           pageIndex={pageNum - 1}
           width={pageWidth}
+          wordPositions={wordPositionsCache[pageNum - 1] || null}
+          wordPositionsLoading={wordPositionsLoadingRef.current.has(pageNum - 1)}
         />
       </div>
     );
@@ -596,6 +641,32 @@ export default function ReaderPage() {
               </div>
             )}
           </div>
+
+          {/* Mobile Loupe — only active on mobile */}
+          <MobileLoupe
+            containerRef={scrollContainerRef}
+            onWordSelected={handleLoupeWordSelected}
+            getWordAtPoint={(vpX, vpY) => {
+              // Inline: find the word at a viewport point using wordPositionsCache
+              const elements = document.elementsFromPoint(vpX, vpY);
+              const pageEl = elements.find(el => el.closest('[data-page-number]'))?.closest('[data-page-number]') as HTMLElement | undefined;
+              if (!pageEl) return null;
+              const pageIdx = Number(pageEl.dataset.pageNumber) - 1;
+              const pageData = wordPositionsCache[pageIdx];
+              if (!pageData || !pageData.words) return null;
+              const pageRect = pageEl.getBoundingClientRect();
+              const scaleX = pageData.page_width / (pageRect.width || 1);
+              const scaleY = pageData.page_height / (pageRect.height || 1);
+              const pdfX = (vpX - pageRect.left) * scaleX;
+              const pdfY = (vpY - pageRect.top) * scaleY;
+              for (const w of pageData.words) {
+                if (pdfX >= w.x0 && pdfX <= w.x1 && pdfY >= w.y0 && pdfY <= w.y1) return w.word;
+              }
+              return null;
+            }}
+            pageZoom={zoomLevel}
+            enabled={isMobile}
+          />
 
           {/* Floating page navigation (bottom-right) */}
           <div
