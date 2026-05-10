@@ -2,7 +2,9 @@ import { useEffect, useRef, useState } from 'react';
 
 export function useContainerWidth() {
   const ref = useRef<HTMLDivElement>(null);
-  const [width, setWidth] = useState(800);
+  const [width, setWidth] = useState(() =>
+    typeof window !== 'undefined' ? Math.min(window.innerWidth - 64, 800) : 800
+  );
 
   useEffect(() => {
     const el = ref.current;

@@ -77,7 +77,7 @@ export default function ReaderPage() {
     savedVocabularyId,
     onVocabularySaved,
     onVocabularyUpdated,
-  } = useTranslation(null, bookId);
+  } = useTranslation(pdfBook, bookId);
 
   const [savedToVocabulary, setSavedToVocabulary] = useState(false);
   const [translateIconPos, setTranslateIconPos] = useState<{ top: number; left: number } | null>(null);
@@ -336,9 +336,8 @@ export default function ReaderPage() {
   // ── Floating translate icon position ──
   useEffect(() => {
     if (selectionRect && selectedText) {
-      const scrollY = window.scrollY || window.pageYOffset;
       setTranslateIconPos({
-        top: selectionRect.top + scrollY - 48,
+        top: selectionRect.top - 48,
         left: selectionRect.left + selectionRect.width / 2,
       });
     } else {
@@ -458,18 +457,23 @@ export default function ReaderPage() {
         key={`page_${pageNum}`}
         data-page-number={pageNum}
         ref={observePageRef(pageNum)}
-        className={`rounded-2xl overflow-hidden shadow-2xl mx-auto transition-all duration-200
+        className={`rounded-2xl shadow-2xl mx-auto transition-all duration-200
           ${theme === 'sepia' ? 'shadow-amber-900/20' : 'shadow-black/40'}
           hover:shadow-2xl
           ${active ? 'ring-2 ring-purple-500/40 shadow-lg shadow-purple-500/10' : ''}`}
-        style={{
-          width: viewMode === 'spread' ? `${pageWidth}px` : 'fit-content',
-          maxWidth: isMobile
-            ? 'calc(100vw - 32px)'
-            : `calc(100vw - ${effectiveSidebarVisible ? 384 + 96 + 60 : 96 + 60}px)`,
-          marginBottom: viewMode === 'single' ? '0' : `${PAGE_GAP}px`,
-          marginTop: viewMode === 'single' ? '0' : '0',
-        }}
+          style={isMobile ? {
+            overflow: 'visible',
+            width: viewMode === 'spread' ? `${pageWidth}px` : 'fit-content',
+            maxWidth: 'calc(100vw - 32px)',
+            marginBottom: viewMode === 'single' ? '0' : `${PAGE_GAP}px`,
+            marginTop: viewMode === 'single' ? '0' : '0',
+          } : {
+            overflow: 'hidden',
+            width: viewMode === 'spread' ? `${pageWidth}px` : 'fit-content',
+            maxWidth: `calc(100vw - ${effectiveSidebarVisible ? 384 + 96 + 60 : 96 + 60}px)`,
+            marginBottom: viewMode === 'single' ? '0' : `${PAGE_GAP}px`,
+            marginTop: viewMode === 'single' ? '0' : '0',
+          }}
       >
         <PageRenderer
           pdf={pdfDocument}
@@ -477,6 +481,7 @@ export default function ReaderPage() {
           width={pageWidth}
           wordPositions={wordPositionsCache[pageNum - 1] || null}
           wordPositionsLoading={wordPositionsLoadingRef.current.has(pageNum - 1)}
+          selectedText={selectedText}
         />
       </div>
     );

@@ -45,7 +45,7 @@ def _get_parser(file_path: str) -> EPUBParser | PDFParser:
     if ext == ".epub":
         return EPUBParser()
     if ext == ".pdf":
-        return PDFParser()
+        return PDFParser(file_path)
     raise ValueError(f"Unsupported file type: {ext}")
 
 
@@ -87,19 +87,20 @@ async def _ensure_chapter_parsed(
     try:
         # For PDFs, use parse_page_with_positions to get bbox coords + page_index
         if ext == ".pdf":
-            blocks = parser.parse_page_with_positions(
-                book_file_path,
-                spine_index=chapter.spine_index,
+            blocks_dict = parser.parse_page_with_positions(
                 page_index=chapter.spine_index,
             )
             paragraphs = [
                 Paragraph(
                     book_id=chapter.book_id, chapter_id=chapter.id,
-                    content=content, index=idx,
-                    page_index=chapter.spine_index,
-                    bbox_x0=x0, bbox_y0=y0, bbox_x1=x1, bbox_y1=y1,
+                    content=block["content"], index=idx,
+                    page_index=block.get("page_index"),
+                    bbox_x0=block.get("bbox_x0"),
+                    bbox_y0=block.get("bbox_y0"),
+                    bbox_x1=block.get("bbox_x1"),
+                    bbox_y1=block.get("bbox_y1"),
                 )
-                for idx, content, x0, y0, x1, y1 in blocks
+                for idx, block in enumerate(blocks_dict)
             ]
         else:
             blocks = parser.parse_chapter(book_file_path, chapter.spine_index)
@@ -187,8 +188,8 @@ async def register_book(
 
     return RegisterBookResponse(
         id=book.id, title=book.title, author=book.author,
-        total_chapters=book.total_chapters, language=book.language,
-        status="ready", created_at=book.created_at,
+        total_chapters=book.total_chapters, total_pages=book.total_pages,
+        language=book.language, status="ready", created_at=book.created_at,
     )
 
 

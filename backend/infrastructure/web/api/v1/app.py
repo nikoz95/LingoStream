@@ -23,6 +23,7 @@ MIGRATIONS = [
     "ALTER TABLE paragraphs ADD COLUMN IF NOT EXISTS bbox_y1 DOUBLE PRECISION",
     "ALTER TABLE books ADD COLUMN IF NOT EXISTS total_pages INTEGER DEFAULT 0",
     "DROP TABLE IF EXISTS page_images",
+    "DROP TABLE IF EXISTS pdf_words",
 ]
 
 

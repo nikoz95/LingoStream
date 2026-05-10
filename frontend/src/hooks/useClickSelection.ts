@@ -178,9 +178,15 @@ export function useClickSelection({
       const dy = e.clientY - mouseDownPos.current.y;
       if (Math.abs(dx) > 5 || Math.abs(dy) > 5) {
         isDragging.current = true;
+        // Real-time: highlight words as user drags
+        const text = findWordsInRect(mouseDownPos.current.x, mouseDownPos.current.y, e.clientX, e.clientY);
+        if (text) {
+          setSelectedText(text);
+          setSelectionRect(getVpSelectionRect(mouseDownPos.current.x, mouseDownPos.current.y, e.clientX, e.clientY));
+        }
       }
     },
-    [enabled],
+    [enabled, findWordsInRect, getVpSelectionRect],
   );
 
   const handleMouseUp = useCallback(
@@ -196,7 +202,7 @@ export function useClickSelection({
 
       if (isDragging.current) {
         isDragging.current = false;
-        // Drag-select: find all words in the drag rectangle
+        // Drag-select: find all words in the drag rectangle using backend bbox coords
         const text = findWordsInRect(startX, startY, e.clientX, e.clientY);
         if (text) {
           setSelectedText(text);
@@ -223,6 +229,13 @@ export function useClickSelection({
           width: 40,
           height: 20,
         });
+      } else {
+        // Click on empty space — clear selection & hide translate icon
+        setSelectedText('');
+        setSelectionRect(null);
+        setIsWordClick(false);
+        setLeftContext('');
+        setRightContext('');
       }
     },
     [enabled, findWordAtPoint, findWordsInRect, getWordContext, getVpSelectionRect],

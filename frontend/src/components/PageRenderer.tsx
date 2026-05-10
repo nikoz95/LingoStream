@@ -23,6 +23,8 @@ interface PageRendererProps {
   wordPositionsLoading: boolean;
   /** Fired when PDF renders successfully — gives actual rendered dims */
   onRender?: (widthPx: number, heightPx: number) => void;
+  /** Currently selected text — matching words will be highlighted visually */
+  selectedText?: string;
 }
 
 const PageRenderer = memo(function PageRenderer({
@@ -33,6 +35,7 @@ const PageRenderer = memo(function PageRenderer({
   wordPositions,
   wordPositionsLoading,
   onRender,
+  selectedText,
 }: PageRendererProps) {
   const pageNumber = pageIndex + 1;
   const [pageLoading, setPageLoading] = useState(true);
@@ -62,6 +65,17 @@ const PageRenderer = memo(function PageRenderer({
       setPageScale(width / pageWidthPx);
     }
   }, [pageWidthPx, width]);
+
+  // Derive set of highlighted words from selectedText
+  const highlightWords = (() => {
+    if (!selectedText || !selectedText.trim()) return new Set<string>();
+    return new Set(
+      selectedText
+        .toLowerCase()
+        .split(/\s+/)
+        .filter(Boolean)
+    );
+  })();
 
   const isUpdating = pageLoading || wordPositionsLoading;
 
@@ -130,11 +144,11 @@ const PageRenderer = memo(function PageRenderer({
             if (w <= 0 || h <= 0) return null;
 
             // Selection highlight: check if this word is part of the currently selected text
-            // (handled via CSS class from useClickSelection)
+            const isHighlighted = highlightWords.has(wp.word.toLowerCase());
             return (
               <span
                 key={`wz-${idx}`}
-                className="pdf-word-zone"
+                className={`pdf-word-zone${isHighlighted ? ' pdf-word-highlighted' : ''}`}
                 data-word={wp.word}
                 data-word-index={wp.word_index}
                 data-line-index={wp.line_index}
@@ -148,7 +162,9 @@ const PageRenderer = memo(function PageRenderer({
                   height: `${h}px`,
                   pointerEvents: 'auto',
                   cursor: 'pointer',
-                  background: 'transparent',
+                  background: isHighlighted ? 'rgba(168, 85, 247, 0.35)' : 'transparent',
+                  borderRadius: '2px',
+                  transition: 'background 0.15s ease',
                 }}
               >
               </span>

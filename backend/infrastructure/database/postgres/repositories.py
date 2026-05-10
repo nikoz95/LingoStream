@@ -133,7 +133,7 @@ class BookRepositoryImpl(BaseRepositoryImpl, BookRepository):
         file_path = book_orm.file_path
 
         # Cascade delete: children first, then nullify vocab references, then delete book
-        # 1. Delete word positions for this book
+        # 1. Delete word positions (current ORM table)
         await self.db.execute(
             delete(orm.WordPosition).where(orm.WordPosition.book_id == book_id)
         )

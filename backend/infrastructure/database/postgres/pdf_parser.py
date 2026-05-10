@@ -149,8 +149,14 @@ class PDFParser(EPUBParser):
         
         return paragraphs
 
-    def extract_metadata(self) -> dict[str, str]:
-        """Extract PDF metadata."""
+    def extract_metadata(self, file_path: str | None = None) -> dict[str, str]:
+        """Extract PDF metadata.
+
+        Accepts optional ``file_path`` for API compatibility with EPUBParser
+        (which is a static method requiring it).
+        """
+        if file_path is not None:
+            self.file_path = file_path
         try:
             meta = self.doc.metadata
             title = (meta.get("title") or "").strip()
@@ -172,7 +178,7 @@ class PDFParser(EPUBParser):
             title = os.path.splitext(base)[0]
             return {"title": title, "author": "Unknown", "language": "auto", "total_pages": self.get_page_count()}
 
-    def extract_toc(self) -> list[dict[str, any]]:
+    def extract_toc(self, file_path: str | None = None) -> list[dict[str, any]]:
         """Extract table of contents."""
         try:
             toc = self.doc.get_toc()
