@@ -104,14 +104,15 @@ export function useClickSelection({
 
   /** Collect all words whose bbox overlaps a viewport rectangle (for drag-select) */
   const findWordsInRect = useCallback(
-    (x1: number, y1: number, x2: number, y2: number): string => {
+    (x1: number, y1: number, x2: number, y2: number): { text: string; keys: string[] } => {
       const vpLeft = Math.min(x1, x2);
       const vpTop = Math.min(y1, y2);
       const vpRight = Math.max(x1, x2);
       const vpBottom = Math.max(y1, y2);
 
       const selectedWords: string[] = [];
-      const seen = new Set<string>();
+      const selectedKeys: string[] = [];
+      const seenPos = new Set<string>(); // track by pageIdx:wordIndex (exact position)
 
       const pages = document.querySelectorAll('[data-page-number]');
       for (const pageEl of pages) {
@@ -130,7 +131,8 @@ export function useClickSelection({
         const pdfBottom = Math.min(pageData.page_height, (vpBottom - pageRect.top) * scaleY);
 
         for (const w of pageData.words) {
-          if (seen.has(w.word.toLowerCase())) continue;
+          const posKey = `${pageIdx}:${w.word_index}`;
+          if (seenPos.has(posKey)) continue;
           const wLeft = w.x0;
           const wTop = w.y0;
           const wRight = w.x1;
@@ -138,11 +140,12 @@ export function useClickSelection({
           const overlap = !(wRight < pdfLeft || wLeft > pdfRight || wBottom < pdfTop || wTop > pdfBottom);
           if (overlap) {
             selectedWords.push(w.word);
-            seen.add(w.word.toLowerCase());
+            selectedKeys.push(posKey);
+            seenPos.add(posKey);
           }
         }
       }
-      return selectedWords.join(' ');
+      return { text: selectedWords.join(' '), keys: selectedKeys };
     },
     [wordPositionsCache],
   );
@@ -178,10 +181,10 @@ export function useClickSelection({
       const dy = e.clientY - mouseDownPos.current.y;
       if (Math.abs(dx) > 5 || Math.abs(dy) > 5) {
         isDragging.current = true;
-        // Real-time: highlight words as user drags
-        const text = findWordsInRect(mouseDownPos.current.x, mouseDownPos.current.y, e.clientX, e.clientY);
-        if (text) {
-          setSelectedText(text);
+        // Real-time: show which words are being selected as user drags
+        const dragResult = findWordsInRect(mouseDownPos.current.x, mouseDownPos.current.y, e.clientX, e.clientY);
+        if (dragResult.text) {
+          setSelectedText(dragResult.text);
           setSelectionRect(getVpSelectionRect(mouseDownPos.current.x, mouseDownPos.current.y, e.clientX, e.clientY));
         }
       }
@@ -203,9 +206,9 @@ export function useClickSelection({
       if (isDragging.current) {
         isDragging.current = false;
         // Drag-select: find all words in the drag rectangle using backend bbox coords
-        const text = findWordsInRect(startX, startY, e.clientX, e.clientY);
-        if (text) {
-          setSelectedText(text);
+        const dragResult = findWordsInRect(startX, startY, e.clientX, e.clientY);
+        if (dragResult.text) {
+          setSelectedText(dragResult.text);
           setIsWordClick(false);
           setLeftContext('');
           setRightContext('');

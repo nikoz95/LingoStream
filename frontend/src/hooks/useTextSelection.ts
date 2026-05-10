@@ -25,22 +25,16 @@ export interface SelectionInfo {
  * Since we use backend-extracted coordinates (not react-pdf's TextLayer),
  * selection works on invisible text nodes inside .pdf-word-zone spans.
  */
-const TEXT_LAYER_SELECTOR = '.pdf-word-zone';
+const TEXT_LAYER_SELECTOR = '.react-pdf__Page__textContent span';
 
 export function useTextSelection() {
   const [selectedText, setSelectedText] = useState('');
   const [selectionRect, setSelectionRect] = useState<DOMRect | null>(null);
   const [isWordClick, setIsWordClick] = useState(false);
-  const [isLongPress, setIsLongPress] = useState(false);
   const [leftContext, setLeftContext] = useState('');
   const [rightContext, setRightContext] = useState('');
 
   const mousedownPos = useRef<{ x: number; y: number } | null>(null);
-  const longPressFired = useRef(false);
-
-  // ── Touch / long-press refs ──
-  const touchStartPos = useRef<{ x: number; y: number } | null>(null);
-  const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   /** Get the word at a text node offset */
   const getWordAtPoint = useCallback((node: Node, offset: number): string => {
@@ -120,7 +114,6 @@ export function useTextSelection() {
 
   const handleMouseUp = useCallback((e: MouseEvent) => {
     if (!isInTextLayer(e.target)) return;
-    if (longPressFired.current) return;
 
     const sel = window.getSelection();
     if (!sel) return;
@@ -179,133 +172,52 @@ export function useTextSelection() {
     }
   }, [isInTextLayer, selectWordAtOffset, getContextAroundWord]);
 
-  // ── Touch / long-press ──
-  const handleTouchStart = useCallback((e: TouchEvent) => {
-    if (!isInTextLayer(e.target)) return;
-    const touch = e.touches[0];
-    touchStartPos.current = { x: touch.clientX, y: touch.clientY };
-    longPressFired.current = false;
-
-    if (longPressTimer.current) clearTimeout(longPressTimer.current);
-    longPressTimer.current = setTimeout(() => {
-      longPressFired.current = true;
-
-      const el = document.elementFromPoint(touch.clientX, touch.clientY);
-      if (!el || !isInTextLayer(el)) return;
-
-      const textLayer = (el as HTMLElement).closest(TEXT_LAYER_SELECTOR);
-      if (!textLayer) return;
-
-      // Find the nearest span with text
-      const span = el.tagName === 'SPAN' ? el as HTMLElement : (el as HTMLElement).closest('span');
-      if (!span || !span.textContent) return;
-
-      const spanRect = span.getBoundingClientRect();
-      const relativeX = touch.clientX - spanRect.left;
-      const ratio = relativeX / spanRect.width;
-      const textLen = span.textContent.length;
-      const offset = Math.round(ratio * textLen);
-      const clampedOffset = Math.max(0, Math.min(offset, textLen - 1));
-
-      const textNode = span.firstChild;
-      if (!textNode || textNode.nodeType !== Node.TEXT_NODE) return;
-
-      selectWordAtOffset(textNode, clampedOffset);
-      setIsLongPress(true);
-    }, 500);
-  }, [isInTextLayer, selectWordAtOffset]);
-
-  const handleTouchMove = useCallback((_e: TouchEvent) => {
-    if (touchStartPos.current && !longPressFired.current) {
-      clearTimeout(longPressTimer.current!);
-      longPressTimer.current = null;
-    }
-  }, []);
-
-  const handleTouchEnd = useCallback(() => {
-    if (longPressTimer.current) {
-      clearTimeout(longPressTimer.current);
-      longPressTimer.current = null;
-    }
-    touchStartPos.current = null;
-  }, []);
-
-  // ── Word hover highlight on TextLayer spans ──
-  const hoveredSpan = useRef<HTMLElement | null>(null);
-
-  const handleMouseOver = useCallback((e: MouseEvent) => {
-    const target = e.target as HTMLElement;
-    if (!isInTextLayer(target)) return;
-    if (target.tagName === 'SPAN') {
-      if (hoveredSpan.current && hoveredSpan.current !== target) {
-        hoveredSpan.current.classList.remove('word-hover-highlight');
-      }
-      target.classList.add('word-hover-highlight');
-      hoveredSpan.current = target;
-    }
-  }, [isInTextLayer]);
-
-  const handleMouseOut = useCallback((e: MouseEvent) => {
-    const target = e.target as HTMLElement;
-    const relatedTarget = e.relatedTarget as HTMLElement | null;
-    if (target.tagName === 'SPAN') {
-      if (relatedTarget && isInTextLayer(relatedTarget)) return;
-      target.classList.remove('word-hover-highlight');
-    }
-    if (!isInTextLayer(target) && hoveredSpan.current) {
-      hoveredSpan.current.classList.remove('word-hover-highlight');
-      hoveredSpan.current = null;
-    }
-  }, [isInTextLayer]);
-
   useEffect(() => {
     document.addEventListener('mousedown', handleMouseDown);
     document.addEventListener('mouseup', handleMouseUp);
-    document.addEventListener('mouseover', handleMouseOver, true);
-    document.addEventListener('mouseout', handleMouseOut, true);
-    document.addEventListener('touchstart', handleTouchStart, { passive: false });
-    document.addEventListener('touchmove', handleTouchMove, { passive: true });
-    document.addEventListener('touchend', handleTouchEnd, { passive: true });
 
     return () => {
       document.removeEventListener('mousedown', handleMouseDown);
       document.removeEventListener('mouseup', handleMouseUp);
-      document.removeEventListener('mouseover', handleMouseOver, true);
-      document.removeEventListener('mouseout', handleMouseOut, true);
-      document.removeEventListener('touchstart', handleTouchStart);
-      document.removeEventListener('touchmove', handleTouchMove);
-      document.removeEventListener('touchend', handleTouchEnd);
-      if (hoveredSpan.current) {
-        hoveredSpan.current.classList.remove('word-hover-highlight');
-      }
-      if (longPressTimer.current) {
-        clearTimeout(longPressTimer.current);
-      }
     };
-  }, [handleMouseDown, handleMouseUp, handleMouseOver, handleMouseOut, handleTouchStart, handleTouchMove, handleTouchEnd]);
+  }, [handleMouseDown, handleMouseUp]);
 
   const clearSelection = useCallback(() => {
     setSelectedText('');
     setSelectionRect(null);
     setIsWordClick(false);
-    setIsLongPress(false);
     setLeftContext('');
     setRightContext('');
     window.getSelection()?.removeAllRanges();
   }, []);
 
-  const resetLongPress = useCallback(() => {
-    setIsLongPress(false);
-  }, []);
+  /** Programmatic word selection for mobile loupe */
+  const selectWord = useCallback((word: string, _pageIndex: number, vpX: number, vpY: number) => {
+    setSelectedText(word);
+    setIsWordClick(true);
+
+    // Find the nearest word zone span to get context
+    const el = document.elementFromPoint(vpX, vpY);
+    const span = el?.closest('.pdf-word-zone') as HTMLElement | null;
+    if (span?.firstChild?.nodeType === Node.TEXT_NODE) {
+      const ctx = getContextAroundWord(span.firstChild, Math.floor((span.firstChild.textContent?.length || 0) / 2));
+      setLeftContext(ctx.left);
+      setRightContext(ctx.right);
+    } else {
+      setLeftContext('');
+      setRightContext('');
+    }
+
+    setSelectionRect(new DOMRect(vpX - 20, vpY - 10, 40, 20));
+  }, [getContextAroundWord]);
 
   return {
     selectedText,
     selectionRect,
     isWordClick,
-    isLongPress,
     leftContext,
     rightContext,
     clearSelection,
-    resetLongPress,
+    selectWord,
   };
 }

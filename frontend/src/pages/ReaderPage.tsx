@@ -4,7 +4,7 @@ import { useAuth } from '../lib/auth';
 import { saveVocabularyWord } from '../lib/api';
 import { usePdfDocument } from '../hooks/usePdfDocument';
 import { useContainerWidth } from '../hooks/useContainerWidth';
-import { useClickSelection } from '../hooks/useClickSelection';
+import { useTextSelection } from '../hooks/useTextSelection';
 import { useTranslation } from '../hooks/useTranslation';
 import { useReadingProgress } from '../hooks/useReadingProgress';
 import { usePdfSearch } from '../hooks/usePdfSearch';
@@ -49,7 +49,7 @@ export default function ReaderPage() {
     onLoadError,
   } = usePdfDocument(bookId);
 
-  // ── Coordinate-based click/drag selection ──
+  // ── Native browser text selection (react-pdf TextLayer) ──
   const {
     selectedText,
     selectionRect,
@@ -58,10 +58,7 @@ export default function ReaderPage() {
     rightContext,
     clearSelection,
     selectWord,
-  } = useClickSelection({
-    containerRef: scrollContainerRef,
-    wordPositionsCache,
-  });
+  } = useTextSelection();
 
   const {
     translating,
@@ -479,9 +476,6 @@ export default function ReaderPage() {
           pdf={pdfDocument}
           pageIndex={pageNum - 1}
           width={pageWidth}
-          wordPositions={wordPositionsCache[pageNum - 1] || null}
-          wordPositionsLoading={wordPositionsLoadingRef.current.has(pageNum - 1)}
-          selectedText={selectedText}
         />
       </div>
     );
