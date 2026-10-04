@@ -1,5 +1,24 @@
 # Repository Architecture
 
+## Frontend Monorepo Structure
+
+- `frontend/` — Main application directory
+  - `node_modules/` — Dependencies (read-only)
+  - `src/` — Source code
+
+Key frontend boundaries (top → bottom):
+1. React Component Layer (`src/pages/`, `src/components/`)
+2. State Management Layer (`src/hooks/`)
+3. API Service Layer (`src/lib/`)
+4. Utility/Helper Layer
+
+Build system (frontend):
+- Vite (bundler + dev server)
+- TypeScript (strict type checking)
+- PDF.js (`pdfjs-dist`) for PDF rendering
+
+External dependencies: React/ReactDOM, Tailwind CSS.
+
 ## Project Structure
 
 The repository follows a standard frontend/backend separation with the following key directories:

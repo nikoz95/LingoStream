@@ -56,17 +56,19 @@ cd frontend && npm run build            # production build + type check
 - Backend: Python 3, type hints, async where the framework already is async.
 - Frontend: TypeScript strict mode, React 19, Tailwind CSS 4, `react-pdf`/`pdfjs-dist` for PDFs.
 - Naming: components PascalCase, files kebab-case (frontend), snake_case (backend).
-- Full standards: see `CONVENTIONS.md`.
+- Full standards: see `docs/conventions.md`.
 
 ## Detailed Context
 
+All docs live in `docs/` (navigation map: `docs/index.md`).
+
 | Doc | Use it when |
 |---|---|
-| `ARCHITECTURE.md` | You need project structure and boundaries |
-| `FEATURES.md` | You need to know which files implement a feature |
-| `API.md` | You are touching endpoints, data flow, or integrations |
-| `CONVENTIONS.md` | You are writing new code and unsure of style |
-| `TESTING.md` | You are running or adding tests |
-| `DEPLOYMENT.md` | You are changing builds, Docker, or config |
+| `docs/architecture.md` | You need project structure and boundaries |
+| `docs/features.md` | You need to know which files implement a feature |
+| `docs/api.md` | You are touching endpoints, data flow, or integrations |
+| `docs/conventions.md` | You are writing new code and unsure of style |
+| `docs/testing.md` | You are running or adding tests |
+| `docs/deployment.md` | You are changing builds, Docker, or config |
 
 > If a doc contradicts the code, **the code wins** — then fix the doc.
