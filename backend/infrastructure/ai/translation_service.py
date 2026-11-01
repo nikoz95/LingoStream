@@ -19,6 +19,26 @@ from config.settings import settings
 
 logger = logging.getLogger(__name__)
 
+LANGUAGE_NAMES = {
+    "ka": "Georgian (ქართული)",
+    "en": "English",
+    "de": "German",
+    "fr": "French",
+    "es": "Spanish",
+    "it": "Italian",
+    "ru": "Russian",
+    "auto": "the language of the text",
+}
+
+
+def _resolve_lang_name(code: str) -> str:
+    """Map language code (e.g. 'ka') to full descriptive name (e.g. 'Georgian (ქართული)')."""
+    if not code:
+        return "Georgian (ქართული)"
+    clean = code.lower().strip()
+    return LANGUAGE_NAMES.get(clean, code)
+
+
 SYSTEM_PROMPT = (
     "You are a professional literary translator. Translate the provided text from "
     "{source_language} to {target_language}. Preserve the literary style, tone, and nuances "
@@ -194,17 +214,19 @@ async def translate(
         return _CACHE[cache_key]
 
     api_key, model, base_url = _resolve_provider(provider)
+    src_name = _resolve_lang_name(source_language)
+    tgt_name = _resolve_lang_name(target_language)
 
     try:
         if effective == "local":
             result = await _call_local(
                 passage, left_context, right_context,
-                book_title, source_language, target_language, model, base_url,
+                book_title, src_name, tgt_name, model, base_url,
             )
         else:
             result = await _call_openai(
                 passage, left_context, right_context,
-                book_title, source_language, target_language, api_key, model, base_url,
+                book_title, src_name, tgt_name, api_key, model, base_url,
             )
         _CACHE[cache_key] = result
         return result
@@ -243,17 +265,19 @@ async def translate_word(
         return _CACHE[cache_key]
 
     api_key, model, base_url = _resolve_provider(provider)
+    src_name = _resolve_lang_name(source_language)
+    tgt_name = _resolve_lang_name(target_language)
 
     try:
         if effective == "local":
             raw = await _call_local_word(
                 word, left_context, right_context,
-                book_title, source_language, target_language, model, base_url,
+                book_title, src_name, tgt_name, model, base_url,
             )
         else:
             raw = await _call_openai_word(
                 word, left_context, right_context,
-                book_title, source_language, target_language, api_key, model, base_url,
+                book_title, src_name, tgt_name, api_key, model, base_url,
             )
         parsed = json.loads(raw)
         if "word" not in parsed:
@@ -308,7 +332,7 @@ async def _call_openai_word(
         messages=messages,
         temperature=0.2,
         response_format={"type": "json_object"},
-        max_tokens=1024,
+        max_tokens=2048,
     )
     await client.close()
     return _clean_translation(response.choices[0].message.content or "")

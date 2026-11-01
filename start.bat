@@ -1,8 +1,8 @@
 @echo off
-title LingoStream — Starting...
+title LingoStream - Starting...
 
 echo =============================================
-echo  LingoStream — Starting all services
+echo  LingoStream - Starting all services
 echo =============================================
 echo.
 echo  This will build and start:

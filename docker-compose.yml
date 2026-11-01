@@ -51,7 +51,7 @@ services:
       - REDIS_URL=redis://redis:6379/0
       # LLM provider — set via backend/.env
       - LLM_PROVIDER=openai
-      - LLM_MODEL=gemini-2.5-flash
+      - LLM_MODEL=gemini-3.5-flash
       - LLM_BASE_URL=https://generativelanguage.googleapis.com/v1beta/openai/
     env_file:
       - ./backend/.env

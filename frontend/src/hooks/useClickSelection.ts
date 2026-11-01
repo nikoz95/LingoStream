@@ -1,18 +1,15 @@
 /**
- * useClickSelection — coordinate-based word/multi-word selection on PDF canvas.
+ * useClickSelection — hybrid word and passage selection for PDF canvas.
  *
- * Replaces useTextSelection.ts. No invisible text nodes, no Range/Selection API.
- * Works by mapping mouse/touch viewport coordinates → PDF point coordinates
- * using backend-extracted per-word bounding boxes.
+ * 1. Single click on a word:
+ *    Uses PyMuPDF backend word bounding boxes (findWordAtPoint) to pinpoint
+ *    the exact dictionary word, lemma, and position.
+ *    Renders a clean purple highlight overlay over that single word.
  *
- * Desktop:
- *  - Click → maps click point → finds word whose bbox contains the point
- *  - Drag → computes selection rect → finds all words whose bbox overlaps
- *
- * Mobile:
- *  - MobileLoupe handles all touch interaction (long-press → loupe, quick tap)
- *  - useClickSelection does NOT attach touch events (no conflict)
- *  - ReaderPage calls selectWord() from MobileLoupe's callbacks
+ * 2. Drag selection (multiple words / sentences / paragraphs):
+ *    Uses browser's native text selection (Selection / Range API).
+ *    Reads the continuous flow of text lines in order (not an arbitrary rectangle).
+ *    Leaves native browser selection highlight active.
  */
 import { useState, useEffect, useRef, useCallback } from 'react';
 import type { WordPositionsPageResponse } from '../lib/api';
@@ -45,11 +42,10 @@ export function useClickSelection({
   const [rightContext, setRightContext] = useState('');
 
   const mouseDownPos = useRef<{ x: number; y: number } | null>(null);
-  const isDragging = useRef(false);
 
   /** Find the word at a given viewport point by checking backend bboxes */
   const findWordAtPoint = useCallback(
-    (viewportX: number, viewportY: number): { word: string; pageIndex: number } | null => {
+    (viewportX: number, viewportY: number): { word: string; pageIndex: number; rect: SelectionRect } | null => {
       const pageEl = document
         .elementsFromPoint(viewportX, viewportY)
         .find((el) => el.closest && el.closest('[data-page-number]'))
@@ -70,8 +66,14 @@ export function useClickSelection({
       const pdfY = (viewportY - pageRect.top) * scaleY;
 
       for (const w of pageData.words) {
-        if (pdfX >= w.x0 && pdfX <= w.x1 && pdfY >= w.y0 && pdfY <= w.y1) {
-          return { word: w.word, pageIndex: pageIdx };
+        if (pdfX >= w.x0 - 2 && pdfX <= w.x1 + 2 && pdfY >= w.y0 - 2 && pdfY <= w.y1 + 2) {
+          const rect: SelectionRect = {
+            left: pageRect.left + w.x0 / scaleX,
+            top: pageRect.top + w.y0 / scaleY,
+            width: (w.x1 - w.x0) / scaleX,
+            height: (w.y1 - w.y0) / scaleY,
+          };
+          return { word: w.word, pageIndex: pageIdx, rect };
         }
       }
       return null;
@@ -102,152 +104,85 @@ export function useClickSelection({
     [wordPositionsCache],
   );
 
-  /** Collect all words whose bbox overlaps a viewport rectangle (for drag-select) */
-  const findWordsInRect = useCallback(
-    (x1: number, y1: number, x2: number, y2: number): { text: string; keys: string[] } => {
-      const vpLeft = Math.min(x1, x2);
-      const vpTop = Math.min(y1, y2);
-      const vpRight = Math.max(x1, x2);
-      const vpBottom = Math.max(y1, y2);
-
-      const selectedWords: string[] = [];
-      const selectedKeys: string[] = [];
-      const seenPos = new Set<string>(); // track by pageIdx:wordIndex (exact position)
-
-      const pages = document.querySelectorAll('[data-page-number]');
-      for (const pageEl of pages) {
-        const pageNum = Number((pageEl as HTMLElement).dataset.pageNumber);
-        const pageIdx = pageNum - 1;
-        const pageData = wordPositionsCache[pageIdx];
-        if (!pageData || !pageData.words) continue;
-
-        const pageRect = pageEl.getBoundingClientRect();
-        const scaleX = pageData.page_width / (pageRect.width || 1);
-        const scaleY = pageData.page_height / (pageRect.height || 1);
-
-        const pdfLeft = Math.max(0, (vpLeft - pageRect.left) * scaleX);
-        const pdfTop = Math.max(0, (vpTop - pageRect.top) * scaleY);
-        const pdfRight = Math.min(pageData.page_width, (vpRight - pageRect.left) * scaleX);
-        const pdfBottom = Math.min(pageData.page_height, (vpBottom - pageRect.top) * scaleY);
-
-        for (const w of pageData.words) {
-          const posKey = `${pageIdx}:${w.word_index}`;
-          if (seenPos.has(posKey)) continue;
-          const wLeft = w.x0;
-          const wTop = w.y0;
-          const wRight = w.x1;
-          const wBottom = w.y1;
-          const overlap = !(wRight < pdfLeft || wLeft > pdfRight || wBottom < pdfTop || wTop > pdfBottom);
-          if (overlap) {
-            selectedWords.push(w.word);
-            selectedKeys.push(posKey);
-            seenPos.add(posKey);
-          }
-        }
-      }
-      return { text: selectedWords.join(' '), keys: selectedKeys };
-    },
-    [wordPositionsCache],
-  );
-
-  /** Compute SelectionRect from viewport coordinates (inverse Y) */
-  const getVpSelectionRect = useCallback(
-    (x1: number, y1: number, x2: number, y2: number): SelectionRect => {
-      return {
-        left: Math.min(x1, x2),
-        top: Math.min(y1, y2),
-        width: Math.abs(x2 - x1),
-        height: Math.abs(y2 - y1),
-      };
-    },
-    [],
-  );
-
   // ── Mouse handlers ──
 
   const handleMouseDown = useCallback(
     (e: MouseEvent) => {
       if (!enabled) return;
       mouseDownPos.current = { x: e.clientX, y: e.clientY };
-      isDragging.current = false;
     },
     [enabled],
   );
 
-  const handleMouseMove = useCallback(
-    (e: MouseEvent) => {
-      if (!enabled || !mouseDownPos.current) return;
-      const dx = e.clientX - mouseDownPos.current.x;
-      const dy = e.clientY - mouseDownPos.current.y;
-      if (Math.abs(dx) > 5 || Math.abs(dy) > 5) {
-        isDragging.current = true;
-        // Real-time: show which words are being selected as user drags
-        const dragResult = findWordsInRect(mouseDownPos.current.x, mouseDownPos.current.y, e.clientX, e.clientY);
-        if (dragResult.text) {
-          setSelectedText(dragResult.text);
-          setSelectionRect(getVpSelectionRect(mouseDownPos.current.x, mouseDownPos.current.y, e.clientX, e.clientY));
-        }
-      }
-    },
-    [enabled, findWordsInRect, getVpSelectionRect],
-  );
-
   const handleMouseUp = useCallback(
     (e: MouseEvent) => {
-      if (!enabled || !mouseDownPos.current) {
-        mouseDownPos.current = null;
+      if (!enabled) return;
+
+      const sel = window.getSelection();
+      const rawSelectedText = sel?.toString().trim() || '';
+
+      // Check if user dragged across multiple characters or words
+      const isDrag = mouseDownPos.current
+        ? Math.abs(e.clientX - mouseDownPos.current.x) > 6 ||
+          Math.abs(e.clientY - mouseDownPos.current.y) > 6
+        : false;
+
+      mouseDownPos.current = null;
+
+      // 1. Passage Drag Selection: let the browser text flow speak!
+      if (isDrag && sel && !sel.isCollapsed && rawSelectedText.length > 0) {
+        setSelectedText(rawSelectedText);
+        const wordCount = rawSelectedText.split(/\s+/).length;
+        setIsWordClick(wordCount === 1);
+        setLeftContext('');
+        setRightContext('');
+
+        try {
+          if (sel.rangeCount > 0) {
+            const r = sel.getRangeAt(0).getBoundingClientRect();
+            setSelectionRect({
+              left: r.left,
+              top: r.top,
+              width: r.width,
+              height: r.height,
+            });
+          }
+        } catch {
+          setSelectionRect(null);
+        }
         return;
       }
 
-      const startX = mouseDownPos.current.x;
-      const startY = mouseDownPos.current.y;
-      mouseDownPos.current = null;
+      // 2. Single Click: use PyMuPDF exact bounding boxes
+      if (!isDrag) {
+        const result = findWordAtPoint(e.clientX, e.clientY);
+        if (result) {
+          // Clean browser native selection range so it doesn't fight the overlay
+          sel?.removeAllRanges();
 
-      if (isDragging.current) {
-        isDragging.current = false;
-        // Drag-select: find all words in the drag rectangle using backend bbox coords
-        const dragResult = findWordsInRect(startX, startY, e.clientX, e.clientY);
-        if (dragResult.text) {
-          setSelectedText(dragResult.text);
+          setSelectedText(result.word);
+          setIsWordClick(true);
+          const ctx = getWordContext(result.word, result.pageIndex);
+          setLeftContext(ctx.left);
+          setRightContext(ctx.right);
+          setSelectionRect(result.rect);
+        } else {
+          // Click on margin / empty space
+          setSelectedText('');
+          setSelectionRect(null);
           setIsWordClick(false);
           setLeftContext('');
           setRightContext('');
-          setSelectionRect(getVpSelectionRect(startX, startY, e.clientX, e.clientY));
+          sel?.removeAllRanges();
         }
-        return;
-      }
-
-      // Single click: find word under cursor
-      const result = findWordAtPoint(e.clientX, e.clientY);
-      if (result) {
-        setSelectedText(result.word);
-        setIsWordClick(true);
-        const ctx = getWordContext(result.word, result.pageIndex);
-        setLeftContext(ctx.left);
-        setRightContext(ctx.right);
-        // Build a tiny rect around the point
-        setSelectionRect({
-          left: e.clientX - 20,
-          top: e.clientY - 10,
-          width: 40,
-          height: 20,
-        });
-      } else {
-        // Click on empty space — clear selection & hide translate icon
-        setSelectedText('');
-        setSelectionRect(null);
-        setIsWordClick(false);
-        setLeftContext('');
-        setRightContext('');
       }
     },
-    [enabled, findWordAtPoint, findWordsInRect, getWordContext, getVpSelectionRect],
+    [enabled, findWordAtPoint, getWordContext],
   );
 
-  // ── Touch handlers (only for single tap — long-press is MobileLoupe's domain) ──
+  // ── Touch handlers ──
 
   const touchStartPos = useRef<{ x: number; y: number } | null>(null);
-  const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const touchMoved = useRef(false);
 
   const handleTouchStart = useCallback(
@@ -256,33 +191,16 @@ export function useClickSelection({
       const touch = e.touches[0];
       touchStartPos.current = { x: touch.clientX, y: touch.clientY };
       touchMoved.current = false;
-
-      if (longPressTimer.current) clearTimeout(longPressTimer.current);
-      // If no long-press fires within 500ms, treat as tap
-      longPressTimer.current = setTimeout(() => {
-        // Long-press timer expired without movement — MobileLoupe will handle it.
-        // Don't fire selection here; let MobileLoupe do it via callback.
-      }, 500);
     },
     [enabled],
   );
 
   const handleTouchMove = useCallback(() => {
     touchMoved.current = true;
-    if (longPressTimer.current) {
-      clearTimeout(longPressTimer.current);
-      longPressTimer.current = null;
-    }
   }, []);
 
   const handleTouchEnd = useCallback(
     (e: TouchEvent) => {
-      if (longPressTimer.current) {
-        clearTimeout(longPressTimer.current);
-        longPressTimer.current = null;
-      }
-
-      // If it was a quick tap (no move, no long-press), select word under finger
       if (!touchMoved.current && touchStartPos.current) {
         const { x, y } = touchStartPos.current;
         touchStartPos.current = null;
@@ -294,12 +212,12 @@ export function useClickSelection({
           const ctx = getWordContext(result.word, result.pageIndex);
           setLeftContext(ctx.left);
           setRightContext(ctx.right);
-          setSelectionRect({ left: x - 20, top: y - 10, width: 40, height: 20 });
+          setSelectionRect(result.rect);
         }
       }
       touchStartPos.current = null;
     },
-    [enabled, findWordAtPoint, getWordContext],
+    [findWordAtPoint, getWordContext],
   );
 
   // ── Event listeners ──
@@ -309,7 +227,6 @@ export function useClickSelection({
     if (!container || !enabled) return;
 
     container.addEventListener('mousedown', handleMouseDown);
-    container.addEventListener('mousemove', handleMouseMove);
     container.addEventListener('mouseup', handleMouseUp);
     container.addEventListener('touchstart', handleTouchStart);
     container.addEventListener('touchmove', handleTouchMove);
@@ -317,13 +234,12 @@ export function useClickSelection({
 
     return () => {
       container.removeEventListener('mousedown', handleMouseDown);
-      container.removeEventListener('mousemove', handleMouseMove);
       container.removeEventListener('mouseup', handleMouseUp);
       container.removeEventListener('touchstart', handleTouchStart);
       container.removeEventListener('touchmove', handleTouchMove);
       container.removeEventListener('touchend', handleTouchEnd);
     };
-  }, [containerRef, enabled, handleMouseDown, handleMouseMove, handleMouseUp, handleTouchStart, handleTouchMove, handleTouchEnd]);
+  }, [containerRef, enabled, handleMouseDown, handleMouseUp, handleTouchStart, handleTouchMove, handleTouchEnd]);
 
   /** Public method for MobileLoupe to set selection programmatically */
   const selectWord = useCallback(
@@ -344,6 +260,7 @@ export function useClickSelection({
     setIsWordClick(false);
     setLeftContext('');
     setRightContext('');
+    window.getSelection()?.removeAllRanges();
   }, []);
 
   return {

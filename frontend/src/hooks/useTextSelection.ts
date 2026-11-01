@@ -21,7 +21,7 @@ export interface SelectionInfo {
   bookId: number;
 }
 
-const TEXT_LAYER_SELECTOR = '.react-pdf__Page__textContent span, .pdf-page span';
+const TEXT_LAYER_SELECTOR = '.textLayer, .textLayer span, .react-pdf__Page__textContent, .react-pdf__Page__textContent span, .pdf-page span, [class*="textLayer"]';
 
 export function useTextSelection() {
   const [selectedText, setSelectedText] = useState('');
@@ -65,22 +65,101 @@ export function useTextSelection() {
   }, []);
 
   /** Auto-select the word at a given text node offset & dispatch selection state */
-  const selectWordAtOffset = useCallback((textNode: Node, offset: number) => {
-    const pick = extractPickFromNode(textNode, offset);
-    if (!pick) return;
+  const selectWordAtOffset = useCallback((textNode: Node, offset: number, clickX?: number, clickY?: number) => {
+    let node = textNode;
+    let charOffset = offset;
 
-    setSelectedText(pick.text);
-    setIsWordClick(true);
-    setLeftContext(pick.leftContext ? `${pick.leftContext} ` : '');
-    setRightContext(pick.rightContext ? ` ${pick.rightContext}` : '');
-
-    try {
-      const parentEl = textNode.parentElement;
-      if (parentEl) {
-        setSelectionRect(parentEl.getBoundingClientRect());
+    // 1. If click coordinates are provided, caretPositionFromPoint / caretRangeFromPoint pinpoint exact character position
+    if (clickX !== undefined && clickY !== undefined) {
+      const doc = document as any;
+      if (doc.caretPositionFromPoint) {
+        const pos = doc.caretPositionFromPoint(clickX, clickY);
+        if (pos && pos.offsetNode) {
+          node = pos.offsetNode;
+          charOffset = pos.offset;
+        }
+      } else if (doc.caretRangeFromPoint) {
+        const r = doc.caretRangeFromPoint(clickX, clickY);
+        if (r && r.startContainer) {
+          node = r.startContainer;
+          charOffset = r.startOffset;
+        }
       }
+    }
+
+    if (node.nodeType !== Node.TEXT_NODE) {
+      if (node.firstChild && node.firstChild.nodeType === Node.TEXT_NODE) {
+        node = node.firstChild;
+        charOffset = 0;
+      } else {
+        return;
+      }
+    }
+
+    const textContent = node.textContent || '';
+    if (!textContent) return;
+
+    charOffset = Math.max(0, Math.min(charOffset, textContent.length));
+
+    // If offset is pointing to the space after a word, nudge backwards
+    if (charOffset > 0 && !/[\w\u00C0-\u024F\u0400-\u04FF\u10A0-\u10FF]/.test(textContent[charOffset] || '') &&
+        /[\w\u00C0-\u024F\u0400-\u04FF\u10A0-\u10FF]/.test(textContent[charOffset - 1] || '')) {
+      charOffset--;
+    }
+
+    let start = charOffset;
+    let end = charOffset;
+
+    // Check if on word char, or immediately adjacent
+    if (!/[\w\u00C0-\u024F\u0400-\u04FF\u10A0-\u10FF]/.test(textContent[start] || '')) {
+      if (start + 1 < textContent.length && /[\w\u00C0-\u024F\u0400-\u04FF\u10A0-\u10FF]/.test(textContent[start + 1])) {
+        start++;
+        end = start;
+      } else if (start > 0 && /[\w\u00C0-\u024F\u0400-\u04FF\u10A0-\u10FF]/.test(textContent[start - 1])) {
+        start--;
+        end = start;
+      }
+    }
+
+    // Expand backwards
+    while (start > 0 && /[\w\u00C0-\u024F\u0400-\u04FF\u10A0-\u10FF]/.test(textContent[start - 1])) {
+      start--;
+    }
+    // Expand forwards
+    while (end < textContent.length && /[\w\u00C0-\u024F\u0400-\u04FF\u10A0-\u10FF]/.test(textContent[end])) {
+      end++;
+    }
+
+    const clickedWord = textContent.slice(start, end).trim();
+    if (!clickedWord) return;
+
+    // Build precise range for this word
+    try {
+      const range = document.createRange();
+      range.setStart(node, start);
+      range.setEnd(node, end);
+
+      // Highlight precisely this word in the browser
+      const sel = window.getSelection();
+      if (sel) {
+        sel.removeAllRanges();
+        sel.addRange(range);
+      }
+
+      setSelectionRect(range.getBoundingClientRect());
     } catch {
       setSelectionRect(null);
+    }
+
+    console.log("[DEBUG]", { clickedWord, textContent, start, end });
+    setSelectedText(clickedWord);
+    setIsWordClick(true);
+
+    // Get surrounding context from the paragraph/block
+    const pick = extractPickFromNode(node, charOffset);
+    if (pick) {
+      setLeftContext(pick.leftContext ? `${pick.leftContext} ` : '');
+      setRightContext(pick.rightContext ? ` ${pick.rightContext}` : '');
     }
   }, []);
 
@@ -97,64 +176,43 @@ export function useTextSelection() {
   }, [isInTextLayer]);
 
   const handleMouseUp = useCallback((e: MouseEvent) => {
-    if (!isInTextLayer(e.target)) return;
-
     const sel = window.getSelection();
     if (!sel) return;
 
-    // Detect click vs drag
-    const isDrag = mousedownPos.current
-      ? Math.abs(e.clientX - mousedownPos.current.x) > 5 ||
-        Math.abs(e.clientY - mousedownPos.current.y) > 5
-      : false;
+    const rawSelectedText = sel.toString().trim();
 
-    if (isDrag) {
-      // Drag selection — use selected text as-is
-      if (!sel.isCollapsed) {
-        const text = sel.toString().trim();
-        if (text) {
-          setSelectedText(text);
-          setIsWordClick(false);
-          setLeftContext('');
-          setRightContext('');
-          try {
-            setSelectionRect(sel.getRangeAt(0).getBoundingClientRect());
-          } catch {
-            setSelectionRect(null);
-          }
+    // 1. If user highlighted/dragged multiple characters/words across the page
+    if (!sel.isCollapsed && rawSelectedText.length > 0) {
+      setSelectedText(rawSelectedText);
+      // If more than 1 word, treat as passage translation
+      const wordCount = rawSelectedText.split(/\s+/).length;
+      setIsWordClick(wordCount === 1);
+      setLeftContext('');
+      setRightContext('');
+
+      try {
+        if (sel.rangeCount > 0) {
+          setSelectionRect(sel.getRangeAt(0).getBoundingClientRect());
         }
+      } catch {
+        setSelectionRect(null);
       }
-    } else {
-      // Click (no drag) — auto-select word under cursor
-      if (sel.rangeCount > 0) {
-        const range = sel.getRangeAt(0);
-        const textNode = range.startContainer;
-        const offset = range.startOffset;
+      return;
+    }
 
-        // If the selection already selected something by native means (double-click),
-        // prefer that. Otherwise auto-select the word at cursor.
-        if (sel.isCollapsed) {
-          selectWordAtOffset(textNode, offset);
-        } else {
-          // Could be a native double-click selection — use as-is if short
-          const text = sel.toString().trim();
-          if (text && text.split(/\s+/).length <= 3) {
-            setSelectedText(text);
-            setIsWordClick(true);
-            // Try to get context from the start container
-            const ctx = getContextAroundWord(textNode, offset);
-            setLeftContext(ctx.left);
-            setRightContext(ctx.right);
-            try {
-              setSelectionRect(sel.getRangeAt(0).getBoundingClientRect());
-            } catch {
-              setSelectionRect(null);
-            }
-          }
-        }
+    // 2. Single click (no drag selection active)
+    if (!isInTextLayer(e.target)) return;
+
+    if (sel.rangeCount > 0) {
+      const range = sel.getRangeAt(0);
+      const textNode = range.startContainer;
+      const offset = range.startOffset;
+
+      if (sel.isCollapsed) {
+        selectWordAtOffset(textNode, offset, e.clientX, e.clientY);
       }
     }
-  }, [isInTextLayer, selectWordAtOffset, getContextAroundWord]);
+  }, [isInTextLayer, selectWordAtOffset]);
 
   useEffect(() => {
     document.addEventListener('mousedown', handleMouseDown);

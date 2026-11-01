@@ -4,7 +4,7 @@ import { useAuth } from '../lib/auth';
 import { saveVocabularyWord } from '../lib/api';
 import { usePdfDocument } from '../hooks/usePdfDocument';
 import { useContainerWidth } from '../hooks/useContainerWidth';
-import { useTextSelection } from '../hooks/useTextSelection';
+import { useClickSelection } from '../hooks/useClickSelection';
 import { useTranslation } from '../hooks/useTranslation';
 import { useReadingProgress } from '../hooks/useReadingProgress';
 import { usePdfSearch } from '../hooks/usePdfSearch';
@@ -58,7 +58,11 @@ export default function ReaderPage() {
     rightContext,
     clearSelection,
     selectWord,
-  } = useTextSelection();
+  } = useClickSelection({
+    containerRef: scrollContainerRef,
+    wordPositionsCache,
+    enabled: true,
+  });
 
   const {
     translating,
@@ -606,6 +610,7 @@ export default function ReaderPage() {
           }}
           className="flex-1 overflow-y-auto overflow-x-hidden relative"
           onWheel={handleWheel}
+          onScroll={() => { clearSelection(); setTranslateIconPos(null); }}
         >
           {/* View mode backdrop for single/spread */}
           {(viewMode === 'single' || viewMode === 'spread') && (
@@ -703,6 +708,21 @@ export default function ReaderPage() {
             </div>
           </div>
         </div>
+
+        {/* Word Highlight Overlay on top of PDF */}
+        {isWordClick && selectionRect && selectedText && (
+          <div
+            className="fixed z-30 pointer-events-none rounded transition-all duration-150"
+            style={{
+              top: `${selectionRect.top}px`,
+              left: `${selectionRect.left}px`,
+              width: `${selectionRect.width}px`,
+              height: `${selectionRect.height}px`,
+              backgroundColor: 'rgba(168, 85, 247, 0.4)',
+              boxShadow: '0 0 0 2px rgba(168, 85, 247, 0.6)',
+            }}
+          />
+        )}
 
         {/* Floating Translate Icon */}
         {translateIconPos && selectedText && !translationResult && !wordResult && !translating && (
