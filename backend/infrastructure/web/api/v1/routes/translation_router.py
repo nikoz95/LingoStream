@@ -147,6 +147,7 @@ async def translate_word_endpoint(
             right_context=body.right_context,
             book_title=body.book_title or book.title,
             source_language=body.source_language or book.language,
+            target_language=body.target_language or "ka",
             provider=body.provider,
         )
     except ts.TranslationError:
@@ -155,6 +156,7 @@ async def translate_word_endpoint(
 
     return TranslateWordResponse(
         word=body.word,
+        lemma=result.get("lemma", body.word),
         translation=result.get("translation", ""),
         phonetic=result.get("phonetic", ""),
         definition=result.get("definition", ""),

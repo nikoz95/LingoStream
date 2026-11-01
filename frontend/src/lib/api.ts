@@ -43,6 +43,23 @@ export function clearTokens(): void {
 
 // ── Fetch wrapper ──
 
+let isRefreshing = false;
+let failedQueue: Array<{
+  resolve: (value: unknown) => void;
+  reject: (reason?: unknown) => void;
+}> = [];
+
+const processQueue = (error: unknown = null) => {
+  failedQueue.forEach((prom) => {
+    if (error) {
+      prom.reject(error);
+    } else {
+      prom.resolve(undefined);
+    }
+  });
+  failedQueue = [];
+};
+
 async function request<T>(
   url: string,
   options: RequestInit = {},
@@ -71,6 +88,52 @@ async function request<T>(
 
   if (res.status === 204) {
     return undefined as T;
+  }
+
+  // Handle 401 Unauthorized with token refresh (only if auth was required and not calling /auth/login or /auth/refresh)
+  if (res.status === 401 && auth && !url.startsWith('/auth/')) {
+    const refreshToken = getRefreshToken();
+    if (refreshToken) {
+      if (!isRefreshing) {
+        isRefreshing = true;
+        try {
+          const refreshRes = await refreshAccessToken();
+          saveTokens(refreshRes.access_token, refreshRes.refresh_token, refreshRes.user);
+          processQueue(null);
+        } catch (refreshErr) {
+          processQueue(refreshErr);
+          clearTokens();
+          window.location.href = '/login';
+          throw refreshErr;
+        } finally {
+          isRefreshing = false;
+        }
+      } else {
+        // Wait for active refresh to finish
+        await new Promise((resolve, reject) => {
+          failedQueue.push({ resolve, reject });
+        });
+      }
+
+      // Retry original request with new access token
+      const newToken = getAccessToken();
+      if (newToken) {
+        headers['Authorization'] = `Bearer ${newToken}`;
+      }
+      const retryRes = await fetch(`${API_BASE}${url}`, {
+        ...options,
+        headers,
+      });
+      if (retryRes.status === 204) return undefined as T;
+      if (!retryRes.ok) {
+        const err = await retryRes.json().catch(() => ({ detail: retryRes.statusText }));
+        throw new Error(err.detail || `Request failed with status ${retryRes.status}`);
+      }
+      return retryRes.json();
+    } else {
+      clearTokens();
+      window.location.href = '/login';
+    }
   }
 
   if (!res.ok) {
@@ -193,6 +256,42 @@ export async function registerBook(file: File): Promise<RegisterBookResponse> {
 
 export async function deleteBook(bookId: number): Promise<void> {
   return request(`/books/${bookId}`, { method: 'DELETE' });
+}
+
+export async function getBookBlob(bookId: number): Promise<Blob> {
+  const token = getAccessToken();
+  const headers: Record<string, string> = {};
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`;
+  }
+
+  let res = await fetch(`${API_BASE}/books/${bookId}/file`, { headers });
+
+  if (res.status === 401) {
+    const refreshToken = getRefreshToken();
+    if (refreshToken) {
+      try {
+        const refreshRes = await refreshAccessToken();
+        saveTokens(refreshRes.access_token, refreshRes.refresh_token, refreshRes.user);
+        headers['Authorization'] = `Bearer ${refreshRes.access_token}`;
+        res = await fetch(`${API_BASE}/books/${bookId}/file`, { headers });
+      } catch {
+        clearTokens();
+        window.location.href = '/login';
+        throw new Error('Session expired');
+      }
+    } else {
+      clearTokens();
+      window.location.href = '/login';
+      throw new Error('Not authenticated');
+    }
+  }
+
+  if (!res.ok) {
+    throw new Error(`Failed to download book file: ${res.statusText}`);
+  }
+
+  return res.blob();
 }
 
 export function getBookFileUrl(bookId: number): string {

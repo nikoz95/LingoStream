@@ -170,12 +170,14 @@ class TranslateWordRequest(BaseModel):
     right_context: str = ""
     book_title: str = ""
     source_language: str = "en"
+    target_language: str = "ka"
     provider: Optional[str] = None
 
 
 class TranslateWordResponse(BaseModel):
     """Response for a single-word translation with phonetic + definition."""
     word: str
+    lemma: str = ""
     translation: str
     phonetic: str = ""
     definition: str = ""

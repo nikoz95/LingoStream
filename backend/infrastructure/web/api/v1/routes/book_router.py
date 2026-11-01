@@ -234,6 +234,7 @@ async def list_chapters(
     db: AsyncSession = Depends(get_session),
     current_user: User = Depends(get_current_user),
 ):
+    await _get_owned_book(book_id, current_user.id, db)
     repo = ChapterRepositoryImpl(db)
     chapters = await repo.get_chapters_by_book(book_id)
     return [_chapter_to_response(ch) for ch in chapters]
@@ -293,10 +294,7 @@ async def get_book_file(
     current_user: User = Depends(get_current_user),
 ):
     """Serve the original uploaded file (EPUB or PDF)."""
-    repo = BookRepositoryImpl(db)
-    book = await repo.get_book_by_id(book_id)
-    if book is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Book not found")
+    book = await _get_owned_book(book_id, current_user.id, db)
 
     file_path = Path(book.file_path)
     if not file_path.exists():

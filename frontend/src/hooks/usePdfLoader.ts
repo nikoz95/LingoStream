@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { getBookFileUrl, getBookDetail, type BookDetailResponse } from '../lib/api';
+import { getBookBlob, getBookDetail, type BookDetailResponse } from '../lib/api';
 
 export function usePdfLoader(bookId: string | undefined) {
   const [book, setBook] = useState<BookDetailResponse | null>(null);
@@ -11,6 +11,7 @@ export function usePdfLoader(bookId: string | undefined) {
     if (!bookId) return;
 
     let canceled = false;
+    let createdUrl = '';
 
     async function init() {
       try {
@@ -18,15 +19,10 @@ export function usePdfLoader(bookId: string | undefined) {
         if (canceled) return;
         setBook(detail);
 
-        const fileUrl = getBookFileUrl(Number(bookId));
-        if (fileUrl) {
-          try {
-            const resp = await fetch(fileUrl);
-            const blob = await resp.blob();
-            if (!canceled) setPdfBlobUrl(URL.createObjectURL(blob));
-          } catch {
-            if (!canceled) setPdfBlobUrl(fileUrl);
-          }
+        const blob = await getBookBlob(Number(bookId));
+        if (!canceled) {
+          createdUrl = URL.createObjectURL(blob);
+          setPdfBlobUrl(createdUrl);
         }
       } catch (err) {
         if (!canceled) {
@@ -41,6 +37,9 @@ export function usePdfLoader(bookId: string | undefined) {
 
     return () => {
       canceled = true;
+      if (createdUrl) {
+        URL.revokeObjectURL(createdUrl);
+      }
     };
   }, [bookId]);
 

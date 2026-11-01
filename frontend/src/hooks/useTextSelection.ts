@@ -10,6 +10,7 @@
  *         isLongPress, clearSelection(), resetLongPress()
  */
 import { useState, useEffect, useRef, useCallback } from 'react';
+import { extractPickFromNode } from '../lib/textPicker';
 
 export interface SelectionInfo {
   text: string;
@@ -20,12 +21,7 @@ export interface SelectionInfo {
   bookId: number;
 }
 
-/**
- * CSS selector for the custom word-level click zones.
- * Since we use backend-extracted coordinates (not react-pdf's TextLayer),
- * selection works on invisible text nodes inside .pdf-word-zone spans.
- */
-const TEXT_LAYER_SELECTOR = '.react-pdf__Page__textContent span';
+const TEXT_LAYER_SELECTOR = '.react-pdf__Page__textContent span, .pdf-page span';
 
 export function useTextSelection() {
   const [selectedText, setSelectedText] = useState('');
@@ -70,35 +66,23 @@ export function useTextSelection() {
 
   /** Auto-select the word at a given text node offset & dispatch selection state */
   const selectWordAtOffset = useCallback((textNode: Node, offset: number) => {
-    const word = getWordAtPoint(textNode, offset);
-    if (!word) return;
+    const pick = extractPickFromNode(textNode, offset);
+    if (!pick) return;
 
-    setSelectedText(word);
+    setSelectedText(pick.text);
     setIsWordClick(true);
+    setLeftContext(pick.leftContext ? `${pick.leftContext} ` : '');
+    setRightContext(pick.rightContext ? ` ${pick.rightContext}` : '');
 
-    const context = getContextAroundWord(textNode, offset);
-    setLeftContext(context.left);
-    setRightContext(context.right);
-
-    // Build a Range for the word to get a bounding rect
     try {
-      const wordRange = document.createRange();
-      const textContent = textNode.textContent || '';
-      let wordStart = offset;
-      let wordEnd = offset;
-      while (wordStart > 0 && /[\w\u00C0-\u024F\u0400-\u04FF\u0500-\u052F]/.test(textContent[wordStart - 1])) {
-        wordStart--;
+      const parentEl = textNode.parentElement;
+      if (parentEl) {
+        setSelectionRect(parentEl.getBoundingClientRect());
       }
-      while (wordEnd < textContent.length && /[\w\u00C0-\u024F\u0400-\u04FF\u0500-\u052F]/.test(textContent[wordEnd])) {
-        wordEnd++;
-      }
-      wordRange.setStart(textNode, wordStart);
-      wordRange.setEnd(textNode, wordEnd);
-      setSelectionRect(wordRange.getBoundingClientRect());
     } catch {
       setSelectionRect(null);
     }
-  }, [getWordAtPoint, getContextAroundWord]);
+  }, []);
 
   /** Check if event target is inside the PDF text layer */
   const isInTextLayer = useCallback((target: EventTarget | null): boolean => {

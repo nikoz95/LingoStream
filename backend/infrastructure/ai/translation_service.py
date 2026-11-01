@@ -1,11 +1,13 @@
 """
-Translation Service — context-aware literary translation to Georgian.
+Translation Service — context-aware literary translation with multi-language support.
 
 Architecture:
 - Default: OpenAI-compatible API (LLM_PROVIDER=openai)
 - Runtime override via ``provider="gemini"|"deepseek"``
 - Also supports LLM_PROVIDER=local (Ollama /api/chat)
+- Features: Structured JSON output, lemma extraction, in-memory LRU cache.
 """
+import hashlib
 import json
 import logging
 from typing import Any, Dict, Optional
@@ -19,36 +21,40 @@ logger = logging.getLogger(__name__)
 
 SYSTEM_PROMPT = (
     "You are a professional literary translator. Translate the provided text from "
-    "{source_language} to Georgian. Preserve the literary style, tone, and nuances "
-    "of the original text. Use natural, idiomatic Georgian expressions where appropriate. "
+    "{source_language} to {target_language}. Preserve the literary style, tone, and nuances "
+    "of the original text. Use natural, idiomatic expressions in {target_language} where appropriate. "
     "The book title is '{book_title}'. Use the provided context (text before and after) "
     "to ensure translation consistency. Return ONLY the translated text, no explanations."
 )
 
 WORD_SYSTEM_PROMPT = (
-    "You are a language tutor helping a student learn {source_language} through Georgian. "
+    "You are a language tutor helping a student learn {source_language} through {target_language}. "
     "Given a single word or short phrase, provide a structured response in the following "
     "JSON format (no markdown, no code fences, just raw JSON):\n\n"
     '{{\n'
-    '  "translation": "<Georgian translation — include BOTH the dictionary/lemma meaning AND the specific contextual form as used in the sentence. If they differ, format as: `dictionary_meaning, contextual_form`. Example: if the dictionary meaning is \'tightness\' but in the sentence it is \'tightened\', write: \'დაჭიმულობა, დაეჭიმა\'. If the dictionary and contextual forms are identical, just the single word.>",\n'
-    '  "phonetic": "<original word> / <standard English pronunciation> / <Georgian-script pronunciation>",\n'
-    '  "definition": "<short definition or explanation in Georgian>",\n'
+    '  "word": "<the original word>",\n'
+    '  "lemma": "<dictionary base form of the word, e.g. run for running>",\n'
+    '  "translation": "<{target_language} translation — include BOTH the dictionary/lemma meaning AND the specific contextual form as used in the sentence. If they differ, format as: `dictionary_meaning, contextual_form`>",\n'
+    '  "phonetic": "<original word> / <standard pronunciation> / <target-script or IPA pronunciation>",\n'
+    '  "definition": "<short definition or explanation in {target_language}>",\n'
     '  "sentence_context": "<example sentence in original language using this word>",\n'
-    '  "sentence_context_translated": "<example sentence translated to Georgian>"\n'
+    '  "sentence_context_translated": "<example sentence translated to {target_language}>"\n'
     '}}\n\n'
-    "IMPORTANT instructions for `phonetic`:\n"
-    "- Format it as: original_word / standard_pronunciation / Georgian_script_pronunciation\n"
-    "- Example: \"very / ˈverē / ვერი\"\n"
-    "- The first part is the original word.\n"
-    "- The second part is the standard English pronunciation using simple dictionary notation or IPA.\n"
-    "- The third part shows how a Georgian speaker would read/pronounce it, written in Georgian script.\n\n"
     "The book title is '{book_title}'. Use provided context for disambiguation if available. "
     "Return ONLY the raw JSON object, nothing else."
 )
 
+# In-memory translation cache (LRU-style hash lookup)
+_CACHE: Dict[str, Any] = {}
+
 
 class TranslationError(Exception):
     """Raised when translation fails for any reason."""
+
+
+def _get_cache_key(parts: list[str]) -> str:
+    raw = "|".join(parts).encode("utf-8")
+    return hashlib.sha256(raw).hexdigest()
 
 
 def _clean_translation(text: str) -> str:
@@ -80,6 +86,7 @@ async def _call_openai(
     right_context: str,
     book_title: str,
     source_language: str,
+    target_language: str,
     api_key: str,
     model: str,
     base_url: str,
@@ -91,7 +98,9 @@ async def _call_openai(
         {
             "role": "system",
             "content": SYSTEM_PROMPT.format(
-                source_language=source_language, book_title=book_title
+                source_language=source_language,
+                target_language=target_language,
+                book_title=book_title,
             ),
         },
     ]
@@ -122,12 +131,15 @@ async def _call_local(
     right_context: str,
     book_title: str,
     source_language: str,
+    target_language: str,
     model: str,
     base_url: str,
 ) -> str:
     """Translate via Ollama local API (/api/chat)."""
     system_content = SYSTEM_PROMPT.format(
-        source_language=source_language, book_title=book_title
+        source_language=source_language,
+        target_language=target_language,
+        book_title=book_title,
     )
 
     messages = [{"role": "system", "content": system_content}]
@@ -159,9 +171,10 @@ async def translate(
     right_context: str = "",
     book_title: str = "",
     source_language: str = "en",
+    target_language: str = "ka",
     provider: Optional[str] = None,
 ) -> str:
-    """Translate a passage of text to Georgian.
+    """Translate a passage of text.
 
     Args:
         passage: The text to translate.
@@ -169,24 +182,32 @@ async def translate(
         right_context: Surrounding text after the passage.
         book_title: Title of the book for LLM context.
         source_language: Language code of the source text.
+        target_language: Language code of target translation.
         provider: Override provider (``"gemini"``, ``"deepseek"``, ``"local"``, or ``None`` for default).
 
     Returns:
         The translated text.
     """
-    api_key, model, base_url = _resolve_provider(provider)
     effective = provider or settings.LLM_PROVIDER
+    cache_key = _get_cache_key([passage, left_context, right_context, source_language, target_language, effective])
+    if cache_key in _CACHE:
+        return _CACHE[cache_key]
+
+    api_key, model, base_url = _resolve_provider(provider)
 
     try:
         if effective == "local":
-            return await _call_local(
+            result = await _call_local(
                 passage, left_context, right_context,
-                book_title, source_language, model, base_url,
+                book_title, source_language, target_language, model, base_url,
             )
-        return await _call_openai(
-            passage, left_context, right_context,
-            book_title, source_language, api_key, model, base_url,
-        )
+        else:
+            result = await _call_openai(
+                passage, left_context, right_context,
+                book_title, source_language, target_language, api_key, model, base_url,
+            )
+        _CACHE[cache_key] = result
+        return result
     except Exception as exc:
         logger.error("Translation failed (provider=%s): %s", effective, exc)
         raise TranslationError(str(exc)) from exc
@@ -199,9 +220,10 @@ async def translate_word(
     right_context: str = "",
     book_title: str = "",
     source_language: str = "en",
+    target_language: str = "ka",
     provider: Optional[str] = None,
 ) -> Dict[str, Any]:
-    """Translate a single word to Georgian with phonetic, definition, and sentence context.
+    """Translate a single word with lemma, phonetic, definition, and sentence context.
 
     Args:
         word: The word to translate.
@@ -209,26 +231,37 @@ async def translate_word(
         right_context: Surrounding text after the word.
         book_title: Title of the book for LLM context.
         source_language: Language code of the source text.
+        target_language: Language code of target translation.
         provider: Override provider.
 
     Returns:
-        Dict with keys: translation, phonetic, definition, sentence_context, sentence_context_translated.
+        Dict with keys: word, lemma, translation, phonetic, definition, sentence_context, sentence_context_translated.
     """
-    api_key, model, base_url = _resolve_provider(provider)
     effective = provider or settings.LLM_PROVIDER
+    cache_key = _get_cache_key([word, left_context, right_context, source_language, target_language, effective])
+    if cache_key in _CACHE:
+        return _CACHE[cache_key]
+
+    api_key, model, base_url = _resolve_provider(provider)
 
     try:
         if effective == "local":
             raw = await _call_local_word(
                 word, left_context, right_context,
-                book_title, source_language, model, base_url,
+                book_title, source_language, target_language, model, base_url,
             )
         else:
             raw = await _call_openai_word(
                 word, left_context, right_context,
-                book_title, source_language, api_key, model, base_url,
+                book_title, source_language, target_language, api_key, model, base_url,
             )
-        return json.loads(raw)
+        parsed = json.loads(raw)
+        if "word" not in parsed:
+            parsed["word"] = word
+        if "lemma" not in parsed:
+            parsed["lemma"] = word
+        _CACHE[cache_key] = parsed
+        return parsed
     except (json.JSONDecodeError, Exception) as exc:
         logger.error("Word translation failed (provider=%s): %s", effective, exc)
         raise TranslationError(str(exc)) from exc
@@ -240,18 +273,21 @@ async def _call_openai_word(
     right_context: str,
     book_title: str,
     source_language: str,
+    target_language: str,
     api_key: str,
     model: str,
     base_url: str,
 ) -> str:
-    """Translate a word via OpenAI-compatible chat API using WORD_SYSTEM_PROMPT."""
+    """Translate a word via OpenAI-compatible chat API with JSON object response."""
     client = AsyncOpenAI(api_key=api_key, base_url=base_url)
 
     messages = [
         {
             "role": "system",
             "content": WORD_SYSTEM_PROMPT.format(
-                source_language=source_language, book_title=book_title
+                source_language=source_language,
+                target_language=target_language,
+                book_title=book_title,
             ),
         },
     ]
@@ -270,7 +306,8 @@ async def _call_openai_word(
     response = await client.chat.completions.create(
         model=model,
         messages=messages,
-        temperature=0.3,
+        temperature=0.2,
+        response_format={"type": "json_object"},
         max_tokens=1024,
     )
     await client.close()
@@ -283,12 +320,15 @@ async def _call_local_word(
     right_context: str,
     book_title: str,
     source_language: str,
+    target_language: str,
     model: str,
     base_url: str,
 ) -> str:
     """Translate a word via Ollama local API with WORD_SYSTEM_PROMPT."""
     system_content = WORD_SYSTEM_PROMPT.format(
-        source_language=source_language, book_title=book_title
+        source_language=source_language,
+        target_language=target_language,
+        book_title=book_title,
     )
 
     messages = [{"role": "system", "content": system_content}]
@@ -304,7 +344,7 @@ async def _call_local_word(
 
     messages.append({"role": "user", "content": f"Translate this word:\n{word}"})
 
-    payload = {"model": model, "messages": messages, "stream": False}
+    payload = {"model": model, "messages": messages, "stream": False, "format": "json"}
 
     async with httpx.AsyncClient(base_url=base_url, timeout=120.0) as client:
         response = await client.post("/api/chat", json=payload)
