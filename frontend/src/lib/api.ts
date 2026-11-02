@@ -258,14 +258,14 @@ export async function deleteBook(bookId: number): Promise<void> {
   return request(`/books/${bookId}`, { method: 'DELETE' });
 }
 
-export async function getBookBlob(bookId: number): Promise<Blob> {
+export async function getBookBlob(bookId: number, format: 'original' | 'epub' = 'original'): Promise<Blob> {
   const token = getAccessToken();
   const headers: Record<string, string> = {};
   if (token) {
     headers['Authorization'] = `Bearer ${token}`;
   }
 
-  let res = await fetch(`${API_BASE}/books/${bookId}/file`, { headers });
+  let res = await fetch(`${API_BASE}/books/${bookId}/file?format=${format}`, { headers });
 
   if (res.status === 401) {
     const refreshToken = getRefreshToken();

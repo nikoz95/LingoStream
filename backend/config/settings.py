@@ -3,17 +3,7 @@ from pydantic_settings import BaseSettings
 
 
 class Settings(BaseSettings):
-    """Application configuration — loaded from .env file / environment.
-
-    Groups:
-        DB_*       → PostgreSQL connection
-        LLM_*      → Default LLM (OpenAI-compatible)
-        GEMINI_*   → Google Gemini provider
-        DEEPSEEK_* → DeepSeek provider
-        LOCAL_*    → Ollama local provider
-        JWT_*      → JWT authentication
-        REDIS_URL  → Redis connection
-    """
+    """Application configuration — loaded from .env file / environment."""
 
     # ── Database ──────────────────────────────────────────────
     DB_HOST: str = "localhost"
@@ -34,14 +24,14 @@ class Settings(BaseSettings):
 
     # ── LLM (default OpenAI-compatible) ───────────────────────
     LLM_API_KEY: str = ""
-    LLM_BASE_URL: str = "https://api.openai.com/v1"
-    LLM_MODEL: str = "gpt-4o-mini"
+    LLM_BASE_URL: str = "https://generativelanguage.googleapis.com/v1beta/openai/"
+    LLM_MODEL: str = "gemini-3.5-flash"
     LLM_PROVIDER: str = "openai"
 
     # ── Gemini ────────────────────────────────────────────────
     GEMINI_API_KEY: str = ""
     GEMINI_BASE_URL: str = "https://generativelanguage.googleapis.com/v1beta/openai/"
-    GEMINI_MODEL: str = "gemini-2.0-flash"
+    GEMINI_MODEL: str = "gemini-3.5-flash"
 
     # ── DeepSeek ──────────────────────────────────────────────
     DEEPSEEK_API_KEY: str = ""
@@ -61,7 +51,15 @@ class Settings(BaseSettings):
     # ── Redis ─────────────────────────────────────────────────
     REDIS_URL: str = "redis://localhost:6379/0"
 
-    # ── Uploads ───────────────────────────────────────────────
+    # ── S3 / MinIO Object Storage ─────────────────────────────
+    S3_ENDPOINT_URL: str = "http://minio:9000"
+    S3_ACCESS_KEY_ID: str = "minioadmin"
+    S3_SECRET_ACCESS_KEY: str = "minioadmin"
+    S3_BUCKET_NAME: str = "lingostream-books"
+    S3_PUBLIC_URL: str = "http://localhost:9000/lingostream-books"
+    S3_REGION: str = "us-east-1"
+
+    # ── Uploads Fallback ──────────────────────────────────────
     UPLOAD_DIR: str = "uploads"
 
     model_config = {"env_file": ".env", "extra": "ignore"}

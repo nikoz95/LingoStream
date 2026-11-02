@@ -18,6 +18,9 @@ import ThumbnailSidebar from '../components/ThumbnailSidebar';
 import SearchPanel from '../components/SearchPanel';
 import PageRenderer from '../components/PageRenderer';
 
+import SettingsModal from '../components/SettingsModal';
+import { getBookBlob } from '../lib/api';
+
 const PAGE_GAP = 24;
 const MIN_ZOOM = 0.5;
 const MAX_ZOOM = 3.0;
@@ -79,6 +82,25 @@ export default function ReaderPage() {
     onVocabularySaved,
     onVocabularyUpdated,
   } = useTranslation(pdfBook, bookId);
+
+  // ── Settings & E-Reader State ──
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [targetLang, setTargetLang] = useState(() => localStorage.getItem('ls_target_lang') || 'ka');
+  const [readerFontSize, setReaderFontSize] = useState(() => Number(localStorage.getItem('ls_font_size')) || 100);
+  
+  
+
+
+
+  const handleTargetLangChange = (lang: string) => {
+    setTargetLang(lang);
+    localStorage.setItem('ls_target_lang', lang);
+  };
+
+  const handleFontSizeChange = (size: number) => {
+    setReaderFontSize(size);
+    localStorage.setItem('ls_font_size', String(size));
+  };
 
   const [savedToVocabulary, setSavedToVocabulary] = useState(false);
   const [translateIconPos, setTranslateIconPos] = useState<{ top: number; left: number } | null>(null);
@@ -189,48 +211,18 @@ export default function ReaderPage() {
     debouncedSearch(q);
   }, [debouncedSearch]);
 
-  // Restore progress after PDF loads
+  // Restore progress once when PDF initially loads
+  const restoredRef = useRef(false);
   useEffect(() => {
-    if (numPages && numPages > 0 && !pdfLoading) {
+    if (numPages && numPages > 0 && !pdfLoading && !restoredRef.current) {
+      restoredRef.current = true;
       scrollToSaved();
     }
   }, [numPages, pdfLoading, scrollToSaved]);
 
-  // ── Page tracking via IntersectionObserver ──
-  useEffect(() => {
-    if (!numPages || !scrollContainerRef.current) return;
-
-    const observer = new IntersectionObserver(
-      (entries) => {
-        if (isScrollingRef.current) return;
-
-        let mostVisible = 0;
-        let maxRatio = 0;
-
-        for (const entry of entries) {
-          const pageNum = Number((entry.target as HTMLElement).dataset.pageNumber);
-          if (entry.isIntersecting && entry.intersectionRatio > maxRatio) {
-            maxRatio = entry.intersectionRatio;
-            mostVisible = pageNum;
-          }
-        }
-
-        if (mostVisible > 0) {
-          setCurrentPage(mostVisible);
-          const percent = (mostVisible / numPages) * 100;
-          saveProgress(mostVisible, percent);
-        }
-      },
-      { threshold: [0.1, 0.3, 0.6], rootMargin: '-50px 0px' },
-    );
-
-    const map = pageNumberRefs.current;
-    map.forEach((el) => observer.observe(el));
-
-    return () => {
-      observer.disconnect();
-    };
-  }, [numPages, saveProgress]);
+  // ── Page tracking: deterministic based on scroll position ──
+  // IntersectionObserver is omitted because ratio dips when scrolling across page boundaries,
+  // causing the current page number to jump backwards (e.g. 7 -> 6 -> 8).
 
   // Observe page refs as they mount
   const observePageRef = useCallback((pageNum: number) => (el: HTMLDivElement | null) => {
@@ -289,10 +281,17 @@ export default function ReaderPage() {
   }, [currentPage, numPages, showSearch, toggleSearch]);
 
   // ── Scroll to page helper ──
+  const scrollTimeoutRef = useRef<number | null>(null);
+
   const scrollToPage = useCallback((page: number) => {
     if (!numPages) return;
     const clamped = Math.max(1, Math.min(page, numPages));
     setCurrentPage(clamped);
+    isScrollingRef.current = true;
+    if (scrollTimeoutRef.current) window.clearTimeout(scrollTimeoutRef.current);
+    scrollTimeoutRef.current = window.setTimeout(() => {
+      isScrollingRef.current = false;
+    }, 800);
 
     if (viewMode === 'spread' && spreadContainerRef.current) {
       const pairIndex = Math.floor((clamped - 1) / 2);
@@ -309,21 +308,30 @@ export default function ReaderPage() {
       }
     }
 
-    const el = pageNumberRefs.current.get(clamped);
+    const el = pageNumberRefs.current.get(clamped) || 
+      scrollContainerRef.current?.querySelector<HTMLElement>(`[data-page-number="${clamped}"]`);
     if (el) {
       el.scrollIntoView({ behavior: 'smooth', block: 'start' });
     }
   }, [numPages, viewMode]);
 
-  // ── Zoom with Ctrl+Wheel ──
-  const handleWheel = useCallback((e: React.WheelEvent) => {
-    if (!e.ctrlKey && !e.metaKey) return;
-    e.preventDefault();
-    e.stopPropagation();
-    setZoomLevel(prev => {
-      const delta = e.deltaY > 0 ? -ZOOM_STEP : ZOOM_STEP;
-      return Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, prev + delta));
-    });
+  // ── Zoom with Ctrl+Wheel (non-passive listener to avoid preventDefault error) ──
+  useEffect(() => {
+    const container = scrollContainerRef.current;
+    if (!container) return;
+
+    const onWheel = (e: WheelEvent) => {
+      if (!e.ctrlKey && !e.metaKey) return;
+      e.preventDefault();
+      e.stopPropagation();
+      setZoomLevel(prev => {
+        const delta = e.deltaY > 0 ? -ZOOM_STEP : ZOOM_STEP;
+        return Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, prev + delta));
+      });
+    };
+
+    container.addEventListener('wheel', onWheel, { passive: false });
+    return () => container.removeEventListener('wheel', onWheel);
   }, []);
 
   // ── Auto-clear translation panel on new selection ──
@@ -406,12 +414,62 @@ export default function ReaderPage() {
     });
   }, [clearSearch]);
 
+    const [scrollProgress, setScrollProgress] = useState(0);
+
+  const handleScroll = useCallback(() => {
+    clearSelection();
+    setTranslateIconPos(null);
+
+    const container = scrollContainerRef.current;
+    if (!container) return;
+
+    // 1. Progress Bar calculation
+    const maxScroll = container.scrollHeight - container.clientHeight;
+    if (maxScroll > 0) {
+      const pct = (container.scrollTop / maxScroll) * 100;
+      setScrollProgress(Math.min(100, Math.max(0, pct)));
+    }
+
+    // 2. Active Page calculation for Scroll view
+    const renderedPages = container.querySelectorAll<HTMLElement>('[data-page-number]');
+    if (renderedPages.length > 0) {
+      const cTop = container.scrollTop;
+      let activeP = 1;
+
+      // Find which page is at the viewport reading level
+      // Each page element's offsetTop within the scrollable container
+      const threshold = cTop + 150;
+      for (let i = 0; i < renderedPages.length; i++) {
+        const pageEl = renderedPages[i];
+        const pageTop = pageEl.offsetTop;
+        const pageNum = Number(pageEl.dataset.pageNumber);
+        if (pageTop <= threshold) {
+          activeP = pageNum;
+        } else {
+          break;
+        }
+      }
+
+      if (activeP > 0) {
+        setCurrentPage((prev) => {
+          if (prev !== activeP) {
+            if (numPages) saveProgress(activeP, (activeP / numPages) * 100);
+            return activeP;
+          }
+          return prev;
+        });
+      }
+    }
+  }, [clearSelection, numPages, saveProgress]);
+
   // ── Compute page dimensions ──
   const pageWidth = viewMode === 'spread'
     ? Math.min(containerWidth * 0.45 * zoomLevel, 600)
     : Math.min(containerWidth, isMobile ? 1000 : 800) * zoomLevel;
 
-  const progressPercent = numPages ? (currentPage / numPages) * 100 : 0;
+  const progressPercent = viewMode === 'scroll' && scrollProgress > 0
+    ? scrollProgress
+    : (numPages ? (currentPage / numPages) * 100 : 0);
 
   const isCurrentPage = (pageNum: number): boolean => {
     if (viewMode === 'scroll') return pageNum === currentPage;
@@ -587,6 +645,9 @@ export default function ReaderPage() {
         onZoomChange={setZoomLevel}
         onViewModeChange={setViewMode}
         onToggleSearch={toggleSearch}
+        
+        
+        onOpenSettings={() => setIsSettingsOpen(true)}
       />
 
       <div className="flex-1 flex overflow-hidden relative">
@@ -609,8 +670,8 @@ export default function ReaderPage() {
             containerWidthRef.current = node;
           }}
           className="flex-1 overflow-y-auto overflow-x-hidden relative"
-          onWheel={handleWheel}
-          onScroll={() => { clearSelection(); setTranslateIconPos(null); }}
+          
+          onScroll={handleScroll}
         >
           {/* View mode backdrop for single/spread */}
           {(viewMode === 'single' || viewMode === 'spread') && (
@@ -629,7 +690,7 @@ export default function ReaderPage() {
             onNavToPage={handleNavToPage}
           />
 
-          {/* Pages */}
+          {/* PDF Pages Viewer (Book Flip Spread / Continuous Scroll / Single Page) */}
           <div className={`relative z-10 ${theme === 'sepia' ? 'theme-sepia' : 'theme-night'}`}>
             {numPages && numPages > 0 ? (
               <>
@@ -674,7 +735,7 @@ export default function ReaderPage() {
 
           {/* Floating page navigation (bottom-right) */}
           <div
-            className="fixed bottom-6 z-40 flex items-center gap-2"
+            className="fixed bottom-6 z-40 flex items-center gap-2 select-none"
             style={{
               right: isMobile
                 ? '1rem'
@@ -702,7 +763,7 @@ export default function ReaderPage() {
                 title="Next page (→)"
               >
                 <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
                 </svg>
               </button>
             </div>
@@ -744,17 +805,15 @@ export default function ReaderPage() {
           </button>
         )}
 
-        {/* Desktop Translation Sidebar */}
-        {!isMobile && showSidebar && (
-          <div className="w-80 lg:w-96 flex-shrink-0 border-l border-white/10 overflow-y-auto">
+        {/* Desktop Floating Translation Widget (Right Side) */}
+        {!isMobile && showSidebar && (selectedText || translationResult || wordResult || translating) && (
+          <div className="fixed right-6 top-20 z-40 max-h-[80vh] overflow-y-auto">
             <TranslationPanel
               selectedText={selectedText}
               translationResult={translationResult}
               wordResult={wordResult}
               translationError={translationError}
               translating={translating}
-              provider={provider}
-              onProviderChange={setProvider}
               onTranslate={handleTranslate}
               onClose={handleCloseTranslation}
               onSaveToVocabulary={handleSaveToVocabulary}
@@ -795,8 +854,6 @@ export default function ReaderPage() {
                   wordResult={wordResult}
                   translationError={translationError}
                   translating={translating}
-                  provider={provider}
-                  onProviderChange={setProvider}
                   onTranslate={handleTranslate}
                   onClose={handleCloseTranslation}
                   onSaveToVocabulary={handleSaveToVocabulary}
@@ -810,6 +867,18 @@ export default function ReaderPage() {
           </div>
         )}
       </div>
+
+      {/* Reader Settings Modal */}
+      <SettingsModal
+        isOpen={isSettingsOpen}
+        onClose={() => setIsSettingsOpen(false)}
+        provider={provider}
+        onProviderChange={setProvider}
+        targetLang={targetLang}
+        onTargetLangChange={handleTargetLangChange}
+        fontSize={readerFontSize}
+        onFontSizeChange={handleFontSizeChange}
+      />
     </div>
   );
 }

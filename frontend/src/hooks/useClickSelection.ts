@@ -129,8 +129,12 @@ export function useClickSelection({
 
       mouseDownPos.current = null;
 
+      // Only allow selection if the mouse interaction originated within an actual PDF page
+      const targetEl = e.target as HTMLElement | null;
+      const isInsidePdfPage = !!targetEl?.closest('[data-page-number]');
+
       // 1. Passage Drag Selection: let the browser text flow speak!
-      if (isDrag && sel && !sel.isCollapsed && rawSelectedText.length > 0) {
+      if (isDrag && sel && !sel.isCollapsed && rawSelectedText.length > 0 && isInsidePdfPage) {
         setSelectedText(rawSelectedText);
         const wordCount = rawSelectedText.split(/\s+/).length;
         setIsWordClick(wordCount === 1);
@@ -150,6 +154,12 @@ export function useClickSelection({
         } catch {
           setSelectionRect(null);
         }
+        return;
+      }
+
+      // Clear any accidental selection outside of PDF pages
+      if (isDrag && !isInsidePdfPage) {
+        sel?.removeAllRanges();
         return;
       }
 

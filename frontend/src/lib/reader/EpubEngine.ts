@@ -36,12 +36,10 @@ export class EpubEngine implements ReaderEngine {
     this.container.innerHTML = '';
     this.container.appendChild(this.viewElement);
 
-    // Import epub parser dynamically
-    const epub = await import('foliate-js/epub.js');
-    const file = new File([fileBlob], 'book.epub', { type: fileBlob.type || 'application/epub+zip' });
-    const book = await epub.open(file);
-
-    await this.viewElement.open(book);
+    const file = new File([fileBlob], 'book.epub', { type: 'application/epub+zip' });
+    await this.viewElement.open(file);
+    await this.viewElement.init({ showTextStart: true });
+    const book = this.viewElement.book;
 
     // Extract TOC
     if (book.toc) {

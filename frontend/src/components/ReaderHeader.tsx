@@ -13,6 +13,8 @@ interface ReaderHeaderProps {
   viewMode: ViewMode;
   progressPercent: number;
   isMobile?: boolean;
+  isEpubMode?: boolean;
+  onToggleEpubMode?: () => void;
   onToggleTheme: () => void;
   onToggleSidebar: () => void;
   onBack: () => void;
@@ -21,6 +23,7 @@ interface ReaderHeaderProps {
   onZoomChange: (zoom: number) => void;
   onViewModeChange: (mode: ViewMode) => void;
   onToggleSearch: () => void;
+  onOpenSettings: () => void;
 }
 
 export default function ReaderHeader({
@@ -33,6 +36,8 @@ export default function ReaderHeader({
   viewMode,
   progressPercent,
   isMobile,
+  isEpubMode = true,
+  onToggleEpubMode,
   onToggleTheme,
   onToggleSidebar,
   onBack,
@@ -41,6 +46,7 @@ export default function ReaderHeader({
   onZoomChange,
   onViewModeChange,
   onToggleSearch,
+  onOpenSettings,
 }: ReaderHeaderProps) {
   const [pageInput, setPageInput] = useState('');
   const inputRef = useRef<HTMLInputElement>(null);
@@ -54,19 +60,16 @@ export default function ReaderHeader({
     inputRef.current?.blur();
   }, [pageInput, numPages, onJumpToPage]);
 
-  const handlePageKeyDown = useCallback((e: React.KeyboardEvent) => {
-    if (e.key === 'Enter') handleJump();
-    if (e.key === 'Escape') {
-      setPageInput('');
-      inputRef.current?.blur();
-    }
-  }, [handleJump]);
-
-  const viewModeIcons: Record<ViewMode, string> = {
-    scroll: '≡',
-    single: '☰',
-    spread: '∥',
-  };
+  const handlePageKeyDown = useCallback(
+    (e: React.KeyboardEvent) => {
+      if (e.key === 'Enter') handleJump();
+      if (e.key === 'Escape') {
+        setPageInput('');
+        inputRef.current?.blur();
+      }
+    },
+    [handleJump],
+  );
 
   return (
     <header className={`flex-shrink-0 glass border-b border-white/10 flex flex-col ${isMobile ? 'px-2 h-12' : 'px-3 h-14'}`}>
@@ -91,6 +94,8 @@ export default function ReaderHeader({
               {currentPage}/{numPages}
             </span>
           )}
+
+
         </div>
 
         {/* Right */}
@@ -134,21 +139,10 @@ export default function ReaderHeader({
             </svg>
           </button>
 
-          {/* View mode */}
-          <button
-            onClick={() => {
-              const modes: ViewMode[] = ['scroll', 'single', 'spread'];
-              const idx = (modes.indexOf(viewMode) + 1) % modes.length;
-              onViewModeChange(modes[idx]);
-            }}
-            className="p-1.5 rounded-xl hover:bg-white/10 transition-colors"
-            title={`View mode: ${viewMode}`}
-          >
-            <span className={`font-mono ${isMobile ? 'text-xs' : 'text-sm'}`}>{viewModeIcons[viewMode]}</span>
-          </button>
 
-          {/* Zoom controls — hide on mobile */}
-          {!isMobile && (
+
+          {/* Zoom Controls — desktop only */}
+          {!isMobile && !isEpubMode && (
             <>
               <button
                 onClick={() => onZoomChange(Math.max(0.5, zoomLevel - 0.1))}
@@ -160,12 +154,12 @@ export default function ReaderHeader({
                 </svg>
               </button>
 
-              <span className="text-xs text-white/50 w-8 text-center tabular-nums">
+              <span className="text-xs opacity-60 w-10 text-center select-none tabular-nums">
                 {Math.round(zoomLevel * 100)}%
               </span>
 
               <button
-                onClick={() => onZoomChange(Math.min(3.0, zoomLevel + 0.1))}
+                onClick={() => onZoomChange(Math.min(2.0, zoomLevel + 0.1))}
                 className="p-1.5 rounded-xl hover:bg-white/10 transition-colors"
                 title="Zoom in"
               >
@@ -173,18 +167,10 @@ export default function ReaderHeader({
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
                 </svg>
               </button>
-
-              <button
-                onClick={() => onZoomChange(1)}
-                className="px-2 py-1 text-[10px] rounded-lg hover:bg-white/10 transition-colors hidden sm:block"
-                title="Reset zoom to 100%"
-              >
-                Fit
-              </button>
             </>
           )}
 
-          {/* Theme — hide on mobile, use system default */}
+          {/* Theme */}
           {!isMobile && (
             <button
               onClick={onToggleTheme}
@@ -205,7 +191,20 @@ export default function ReaderHeader({
             </button>
           )}
 
-          {/* Sign Out — icon only on mobile */}
+          {/* ⚙️ Settings Modal trigger */}
+          <button
+            onClick={onOpenSettings}
+            className="p-1.5 rounded-xl hover:bg-white/10 transition-colors text-purple-400 hover:text-purple-300"
+            title="Settings (AI engine, font, language)"
+          >
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+            </svg>
+          </button>
+
+          {/* Sign Out */}
           <button
             onClick={onLogout}
             className={`rounded-xl hover:bg-white/10 transition-colors ${isMobile ? 'p-1.5' : 'px-3 py-1.5 text-xs border border-white/15'}`}

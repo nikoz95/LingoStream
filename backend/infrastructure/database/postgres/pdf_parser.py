@@ -40,7 +40,15 @@ class PDFParser(EPUBParser):
     @property
     def doc(self) -> "fitz.Document":
         if self._doc is None:
-            self._doc = fitz.open(self.file_path)
+            from pathlib import Path
+            p = Path(self.file_path)
+            if p.exists() and p.is_file():
+                self._doc = fitz.open(self.file_path)
+            else:
+                # Retrieve from MinIO / S3 storage
+                from infrastructure.storage.storage_service import storage_service
+                pdf_bytes = storage_service.get_file_bytes(self.file_path)
+                self._doc = fitz.open(stream=pdf_bytes, filetype="pdf")
             self._page_count = self._doc.page_count
         return self._doc
 
