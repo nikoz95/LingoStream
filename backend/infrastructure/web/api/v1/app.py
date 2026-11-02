@@ -16,6 +16,7 @@ from infrastructure.web.api.v1.routes.page_router import router as page_router
 
 MIGRATIONS = [
     "ALTER TABLE vocabulary_words ADD COLUMN IF NOT EXISTS sentence_context_translated TEXT",
+    "ALTER TABLE vocabulary_words ADD COLUMN IF NOT EXISTS is_mastered BOOLEAN DEFAULT FALSE NOT NULL",
     "ALTER TABLE paragraphs ADD COLUMN IF NOT EXISTS page_index INTEGER",
     "ALTER TABLE paragraphs ADD COLUMN IF NOT EXISTS bbox_x0 DOUBLE PRECISION",
     "ALTER TABLE paragraphs ADD COLUMN IF NOT EXISTS bbox_y0 DOUBLE PRECISION",

@@ -199,6 +199,7 @@ class VocabularyWordSchema(BaseModel):
     sentence_context_translated: Optional[str] = None
     translation: Optional[str] = None
     book_id: Optional[int] = None
+    is_mastered: bool = False
     created_at: Optional[datetime] = None
 
     model_config = {"from_attributes": True}
@@ -224,6 +225,7 @@ class UpdateVocabularyWordRequest(BaseModel):
     sentence_context_translated: Optional[str] = None
     translation: Optional[str] = None
     book_id: Optional[int] = None
+    is_mastered: Optional[bool] = None
 
 
 class VocabularyCheckResponse(BaseModel):

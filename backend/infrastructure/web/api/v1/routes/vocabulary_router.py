@@ -123,8 +123,16 @@ async def update_vocabulary_word(
 
     # Build update dict with only provided fields
     update_fields = {}
-    for field in ("word", "phonetic", "definition", "sentence_context",
-                  "sentence_context_translated", "translation", "book_id"):
+    for field in (
+        "word",
+        "phonetic",
+        "definition",
+        "sentence_context",
+        "sentence_context_translated",
+        "translation",
+        "book_id",
+        "is_mastered",
+    ):
         val = getattr(body, field, None)
         if val is not None:
             update_fields[field] = val

@@ -47,7 +47,8 @@ export function extractPickFromNode(
   // Compute character index of click relative to full block text
   let charIndexInBlock = 0;
   try {
-    const range = document.createRange();
+    const ownerDoc = targetNode.ownerDocument || document;
+    const range = ownerDoc.createRange();
     range.selectNodeContents(block);
     range.setEnd(targetNode, offset);
     charIndexInBlock = range.toString().length;
@@ -63,24 +64,14 @@ export function extractPickFromNode(
     isWordLike?: boolean;
   }>;
 
-  // Find segment at charIndexInBlock
+  // Find segment at charIndexInBlock (only if directly on a word)
   let pickedWord = '';
   for (const w of words) {
-    if (charIndexInBlock >= w.index && charIndexInBlock < w.index + w.segment.length) {
+    if (charIndexInBlock >= w.index && charIndexInBlock <= w.index + w.segment.length) {
       if (w.isWordLike) {
         pickedWord = w.segment.trim();
+        break;
       }
-      break;
-    }
-  }
-
-  if (!pickedWord) {
-    // Fallback: look at closest word-like segment
-    const nearby = words.find(
-      (w) => w.isWordLike && Math.abs(w.index - charIndexInBlock) < 10
-    );
-    if (nearby) {
-      pickedWord = nearby.segment.trim();
     }
   }
 

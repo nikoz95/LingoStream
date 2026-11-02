@@ -92,12 +92,23 @@ def _resolve_provider(provider: Optional[str] = None):
     effective = provider or settings.LLM_PROVIDER
 
     if effective == "gemini":
-        return settings.GEMINI_API_KEY, settings.GEMINI_MODEL, settings.GEMINI_BASE_URL
+        key = settings.GEMINI_API_KEY or settings.LLM_API_KEY
+        return key, settings.GEMINI_MODEL, settings.GEMINI_BASE_URL
     if effective == "deepseek":
         return settings.DEEPSEEK_API_KEY, settings.DEEPSEEK_MODEL, settings.DEEPSEEK_BASE_URL
     if effective == "local":
         return "", settings.LOCAL_MODEL, settings.LOCAL_BASE_URL
     return settings.LLM_API_KEY, settings.LLM_MODEL, settings.LLM_BASE_URL
+
+
+def _fallback_models_for(primary_model: str, base_url: str) -> list[str]:
+    """Return ordered list of models to try when a Gemini model hits 429 rate-limit."""
+    if "generativelanguage.googleapis.com" in (base_url or ""):
+        models = ["gemini-3.5-flash-lite"]
+        if primary_model not in models:
+            models.append(primary_model)
+        return models
+    return [primary_model]
 
 
 async def _call_openai(
@@ -111,8 +122,8 @@ async def _call_openai(
     model: str,
     base_url: str,
 ) -> str:
-    """Translate via OpenAI-compatible chat API."""
-    client = AsyncOpenAI(api_key=api_key, base_url=base_url)
+    """Translate via OpenAI-compatible chat API with automatic model fallback on 429."""
+    client = AsyncOpenAI(api_key=api_key, base_url=base_url, max_retries=0)
 
     messages = [
         {
@@ -135,14 +146,23 @@ async def _call_openai(
 
     messages.append({"role": "user", "content": f"Translate:\n{passage}"})
 
-    response = await client.chat.completions.create(
-        model=model,
-        messages=messages,
-        temperature=0.3,
-        max_tokens=4096,
-    )
-    await client.close()
-    return _clean_translation(response.choices[0].message.content or "")
+    last_exc: Optional[Exception] = None
+    try:
+        for candidate_model in _fallback_models_for(model, base_url):
+            try:
+                response = await client.chat.completions.create(
+                    model=candidate_model,
+                    messages=messages,
+                    temperature=0.3,
+                    max_tokens=4096,
+                )
+                return _clean_translation(response.choices[0].message.content or "")
+            except Exception as exc:
+                last_exc = exc
+                logger.warning("Model %s failed (%s), trying next fallback...", candidate_model, exc)
+        raise last_exc or TranslationError("All translation models failed")
+    finally:
+        await client.close()
 
 
 async def _call_local(
@@ -302,8 +322,8 @@ async def _call_openai_word(
     model: str,
     base_url: str,
 ) -> str:
-    """Translate a word via OpenAI-compatible chat API with JSON object response."""
-    client = AsyncOpenAI(api_key=api_key, base_url=base_url)
+    """Translate a word via OpenAI-compatible chat API with JSON object response and fallback."""
+    client = AsyncOpenAI(api_key=api_key, base_url=base_url, max_retries=0)
 
     messages = [
         {
@@ -327,15 +347,24 @@ async def _call_openai_word(
 
     messages.append({"role": "user", "content": f"Translate this word:\n{word}"})
 
-    response = await client.chat.completions.create(
-        model=model,
-        messages=messages,
-        temperature=0.2,
-        response_format={"type": "json_object"},
-        max_tokens=2048,
-    )
-    await client.close()
-    return _clean_translation(response.choices[0].message.content or "")
+    last_exc: Optional[Exception] = None
+    try:
+        for candidate_model in _fallback_models_for(model, base_url):
+            try:
+                response = await client.chat.completions.create(
+                    model=candidate_model,
+                    messages=messages,
+                    temperature=0.2,
+                    response_format={"type": "json_object"},
+                    max_tokens=2048,
+                )
+                return _clean_translation(response.choices[0].message.content or "")
+            except Exception as exc:
+                last_exc = exc
+                logger.warning("Word model %s failed (%s), trying next fallback...", candidate_model, exc)
+        raise last_exc or TranslationError("All word translation models failed")
+    finally:
+        await client.close()
 
 
 async def _call_local_word(
