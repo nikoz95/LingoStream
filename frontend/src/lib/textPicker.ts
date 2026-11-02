@@ -121,6 +121,8 @@ export function extractPickFromNode(
 
 /**
  * Pick text from point (x, y) coordinates on screen.
+ * Verifies that the point is actually inside or within 12px of the character's bounding box
+ * so tapping on margins or whitespace returns null instead of the nearest word.
  */
 export function pickTextFromPoint(
   clientX: number,
@@ -145,7 +147,33 @@ export function pickTextFromPoint(
     }
   }
 
-  if (!node) return null;
+  if (!node || node.nodeType !== Node.TEXT_NODE) return null;
+
+  // Verify the click point is actually close to the character at offset (not in empty margin)
+  try {
+    const textLen = node.textContent?.length || 0;
+    if (textLen === 0) return null;
+    const charRange = doc.createRange();
+    const startIdx = Math.max(0, Math.min(offset, textLen - 1));
+    const endIdx = Math.min(textLen, startIdx + 1);
+    charRange.setStart(node, startIdx);
+    charRange.setEnd(node, endIdx);
+    const rect = charRange.getBoundingClientRect();
+    const padX = 16;
+    const padY = 14;
+    if (
+      rect.width > 0 &&
+      rect.height > 0 &&
+      (clientX < rect.left - padX ||
+        clientX > rect.right + padX ||
+        clientY < rect.top - padY ||
+        clientY > rect.bottom + padY)
+    ) {
+      return null;
+    }
+  } catch {
+    // ignore range check error
+  }
 
   return extractPickFromNode(node, offset, undefined, lang);
 }

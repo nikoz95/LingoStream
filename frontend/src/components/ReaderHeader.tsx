@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef } from 'react';
+import { useState, useCallback, useRef, useEffect } from 'react';
 import type { EpubFontFamily, EpubLayoutMode, EpubTheme } from '../lib/reader/EpubEngine';
 import type { TocItem } from '../lib/reader/types';
 
@@ -100,14 +100,38 @@ export default function ReaderHeader({
     [handleJump],
   );
 
+  const headerRef = useRef<HTMLElement>(null);
+
+  useEffect(() => {
+    if (!showToc && !showAppearance) return;
+    const closeMenus = () => {
+      setShowToc(false);
+      setShowAppearance(false);
+    };
+    const onPointerDown = (e: PointerEvent) => {
+      if (headerRef.current?.contains(e.target as Node)) return;
+      closeMenus();
+    };
+    // Also close when user taps inside the EPUB iframe (which causes window blur)
+    window.addEventListener('pointerdown', onPointerDown);
+    window.addEventListener('blur', closeMenus);
+    return () => {
+      window.removeEventListener('pointerdown', onPointerDown);
+      window.removeEventListener('blur', closeMenus);
+    };
+  }, [showToc, showAppearance]);
+
   return (
     <header
-      className={`flex-shrink-0 glass border-b border-white/10 flex flex-col relative z-30 ${
-        isMobile ? 'px-2 h-12' : 'px-4 h-14'
+      ref={headerRef}
+      className={`flex-shrink-0 glass border-b border-white/10 flex flex-col relative ${
+        showToc || showAppearance ? 'z-50' : 'z-30'
+      } pt-[env(safe-area-inset-top)] ${
+        isMobile ? 'px-2' : 'px-4'
       }`}
     >
       {/* Main row */}
-      <div className={`flex items-center justify-between ${isMobile ? 'h-12' : 'h-14'}`}>
+      <div className={`flex items-center justify-between ${isMobile ? 'h-13' : 'h-14'}`}>
         {/* Left: Back + Title + TOC + Progress */}
         <div className="flex items-center gap-2 min-w-0">
           <button

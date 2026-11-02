@@ -6,7 +6,7 @@
  * table of contents, progress tracking, and single-click / drag text selection.
  */
 import type { ReaderEngine, BookFormat, Locator, TocItem } from './types';
-import { extractPickFromNode, type TextPick } from '../textPicker';
+import { extractPickFromNode, pickTextFromPoint, type TextPick } from '../textPicker';
 
 // Register foliate-view web component
 import 'foliate-js/view.js';
@@ -73,6 +73,7 @@ export class EpubEngine implements ReaderEngine {
   private keydownListeners: Array<(key: string) => void> = [];
   private currentCfi: string = '';
   private toc: TocItem[] = [];
+  private activePickedWord: string = '';
   private styleOptions: EpubStyleOptions = {
     fontSize: 110,
     theme: 'night',
@@ -121,9 +122,20 @@ export class EpubEngine implements ReaderEngine {
       this.setupTextEvents(doc);
     });
 
-    // Track relocation/progress
+    // Critical fix for foliate-js paginator:
+    // Foliate's internal relocate listener calls `setSelectionTo(detail.range, -1)` which
+    // programmatically selects the entire visible page on iOS/WebKit! Clear it immediately.
     this.viewElement.addEventListener('relocate', (e: any) => {
       const detail = e.detail || {};
+      try {
+        const contents = this.viewElement?.renderer?.getContents?.() || [];
+        for (const content of contents) {
+          content.doc?.getSelection?.()?.removeAllRanges?.();
+        }
+      } catch {
+        // ignore
+      }
+
       if (detail.cfi) {
         this.currentCfi = detail.cfi;
       }
@@ -161,24 +173,25 @@ export class EpubEngine implements ReaderEngine {
 
     try {
       // 1. Configure paginator layout attributes
+      const isSmallScreen = typeof window !== 'undefined' && window.innerWidth < 768;
       renderer.setAttribute('animated', '');
       if (layoutMode === 'scrolled') {
         renderer.setAttribute('flow', 'scrolled');
         renderer.setAttribute('max-inline-size', `${maxWidth}px`);
-        renderer.setAttribute('margin', '32px');
+        renderer.setAttribute('margin', isSmallScreen ? '48px' : '32px');
       } else if (layoutMode === 'paginated-spread') {
         renderer.setAttribute('flow', 'paginated');
         renderer.setAttribute('max-column-count', '2');
         renderer.setAttribute('max-inline-size', `${Math.min(maxWidth, 640)}px`);
         renderer.setAttribute('gap', '6%');
-        renderer.setAttribute('margin', '44px');
+        renderer.setAttribute('margin', '56px');
       } else {
         // paginated-single
         renderer.setAttribute('flow', 'paginated');
         renderer.setAttribute('max-column-count', '1');
         renderer.setAttribute('max-inline-size', `${maxWidth}px`);
-        renderer.setAttribute('gap', '5%');
-        renderer.setAttribute('margin', '44px');
+        renderer.setAttribute('gap', isSmallScreen ? '6%' : '5%');
+        renderer.setAttribute('margin', isSmallScreen ? '72px' : '56px');
       }
 
       // 2. Inject CSS into loaded EPUB documents
@@ -190,11 +203,15 @@ export class EpubEngine implements ReaderEngine {
           font-size: ${fontSize}% !important;
           line-height: ${lineHeight} !important;
           -webkit-font-smoothing: antialiased;
+          -webkit-touch-callout: none !important;
+          -webkit-user-select: text !important;
+          user-select: text !important;
         }
         p, li, blockquote, dd, dt, span, div {
           font-family: ${fontStack} !important;
           line-height: ${lineHeight} !important;
           color: ${palette.fg} !important;
+          -webkit-touch-callout: none !important;
         }
         p {
           margin: 0 0 0.85em 0 !important;
@@ -247,95 +264,177 @@ export class EpubEngine implements ReaderEngine {
       }
     });
 
+    // Suppress native context menu on touch devices so it doesn't collide with our reader UI
+    doc.addEventListener('contextmenu', (e: MouseEvent) => {
+      const isTouch = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
+      if (isTouch) {
+        e.preventDefault();
+      }
+    });
+
     let downX = 0;
     let downY = 0;
+    let downTime = 0;
+    let selectionSettleTimer: any = null;
+    let isUserInteracting = false;
+    let lastNotifiedText = '';
+
+    const emitViewportPick = (pick: TextPick, clientX: number, clientY: number, rawRect?: DOMRect) => {
+      const frameEl = doc.defaultView?.frameElement as HTMLElement | null;
+      const frameRect = frameEl?.getBoundingClientRect() || new DOMRect(0, 0, 0, 0);
+      const viewportRect = new DOMRect(
+        frameRect.left + (rawRect?.width ? rawRect.left : clientX),
+        frameRect.top + (rawRect?.height ? rawRect.top : clientY - 12),
+        rawRect?.width || 24,
+        rawRect?.height || 20,
+      );
+      pick.rects = [viewportRect];
+      lastNotifiedText = pick.text;
+      this.activePickedWord = pick.text;
+      this.notifyPick(pick);
+    };
+
+    // Listen to native selection changes (when user holds long and drags selection handles to pick a sentence)
+    doc.addEventListener('selectionchange', () => {
+      if (!isUserInteracting) return;
+
+      if (selectionSettleTimer) clearTimeout(selectionSettleTimer);
+      selectionSettleTimer = setTimeout(() => {
+        const sel = doc.getSelection();
+        if (!sel || sel.isCollapsed || sel.rangeCount === 0) return;
+        const selectedStr = sel.toString().trim();
+        if (!selectedStr || selectedStr.length < 2 || selectedStr.length > 800) return;
+        if (selectedStr === lastNotifiedText) return;
+
+        // Only auto-stage from selectionchange when user selects multiple words (a phrase/sentence)
+        const wordCount = selectedStr.split(/\s+/).length;
+        if (wordCount < 2) return;
+
+        const range = sel.getRangeAt(0);
+        const rawRect = range.getBoundingClientRect();
+        const pick = extractPickFromNode(range.startContainer, range.startOffset);
+        if (pick) {
+          pick.text = selectedStr;
+          emitViewportPick(pick, rawRect.left, rawRect.top, rawRect);
+        } else {
+          emitViewportPick(
+            {
+              text: selectedStr,
+              sentence: selectedStr,
+              leftContext: '',
+              rightContext: '',
+              offsetInSentence: 0,
+              rects: [],
+            },
+            rawRect.left,
+            rawRect.top,
+            rawRect,
+          );
+        }
+      }, 450);
+    });
+
     doc.addEventListener('pointerdown', (e: PointerEvent) => {
       downX = e.clientX;
       downY = e.clientY;
+      downTime = Date.now();
+      isUserInteracting = true;
+      lastNotifiedText = '';
     });
 
     doc.addEventListener('pointerup', (e: PointerEvent) => {
-      // Ignore right-clicks
+      // Keep isUserInteracting true for 2.5s after pointerup so dragging iOS blue selection handles continues to work
+      setTimeout(() => {
+        isUserInteracting = false;
+      }, 2500);
+
       if (e.button !== 0) return;
 
-      // Ignore clicks on links
       const targetEl = e.target as HTMLElement | null;
       if (targetEl?.closest?.('a[href]')) return;
 
       const sel = doc.getSelection();
-      if (!sel || sel.rangeCount === 0) return;
+      const selectedStr = sel && !sel.isCollapsed ? sel.toString().trim() : '';
 
-      const range = sel.getRangeAt(0);
-      const selectedStr = sel.toString().trim();
-
-      if (selectedStr && !sel.isCollapsed && selectedStr.length >= 2) {
-        // Multi-word or phrase drag selection
-        const frameEl = doc.defaultView?.frameElement as HTMLElement | null;
-        const frameRect = frameEl?.getBoundingClientRect() || new DOMRect(0, 0, 0, 0);
+      // 1. Multi-word / sentence selection (after long-press + drag) -> stage sentence & offer translation
+      if (sel && selectedStr && selectedStr.split(/\s+/).length >= 2 && selectedStr.length <= 800) {
+        if (selectionSettleTimer) clearTimeout(selectionSettleTimer);
+        const range = sel.getRangeAt(0);
         const rawRect = range.getBoundingClientRect();
-        const viewportRect = new DOMRect(
-          frameRect.left + (rawRect.width ? rawRect.left : e.clientX),
-          frameRect.top + (rawRect.height ? rawRect.top : e.clientY - 12),
-          rawRect.width || 24,
-          rawRect.height || 20,
-        );
-
         const pick = extractPickFromNode(range.startContainer, range.startOffset);
         if (pick) {
           pick.text = selectedStr;
-          pick.rects = [viewportRect];
-          this.notifyPick(pick);
+          emitViewportPick(pick, e.clientX, e.clientY, rawRect);
         } else {
+          emitViewportPick(
+            {
+              text: selectedStr,
+              sentence: selectedStr,
+              leftContext: '',
+              rightContext: '',
+              offsetInSentence: 0,
+              rects: [],
+            },
+            e.clientX,
+            e.clientY,
+            rawRect,
+          );
+        }
+        return;
+      }
+
+      // 2. Quick tap (< 380ms, no swipe):
+      // If something is already selected/open, tapping anywhere dismisses it first!
+      // Otherwise tapping a word shows the "თარგმნა" button.
+      const moveDist = Math.hypot(e.clientX - downX, e.clientY - downY);
+      const pressDuration = Date.now() - downTime;
+
+      if (moveDist < 10 && pressDuration < 380) {
+        doc.getSelection()?.removeAllRanges();
+
+        if (this.activePickedWord) {
+          this.activePickedWord = '';
+          lastNotifiedText = '';
           this.notifyPick({
-            text: selectedStr,
-            sentence: selectedStr,
+            text: '',
+            sentence: '',
             leftContext: '',
             rightContext: '',
             offsetInSentence: 0,
-            rects: [viewportRect],
+            rects: [],
           });
+          return;
         }
-      } else if (sel.isCollapsed && Math.hypot(e.clientX - downX, e.clientY - downY) < 8) {
-        // Single word click
-        const pick = extractPickFromNode(range.startContainer, range.startOffset);
-        if (pick && pick.text) {
-          // Select/highlight the clicked word visually inside the EPUB iframe
-          let rawRect = range.getBoundingClientRect();
-          if (range.startContainer.nodeType === Node.TEXT_NODE) {
-            const textContent = range.startContainer.textContent || '';
-            const beforeClick = textContent.slice(0, range.startOffset);
-            const afterClick = textContent.slice(range.startOffset);
-            const leftMatch = beforeClick.match(/[\w'-]+$/);
-            const rightMatch = afterClick.match(/^[\w'-]+/);
-            const wordStart = range.startOffset - (leftMatch ? leftMatch[0].length : 0);
-            const wordEnd = range.startOffset + (rightMatch ? rightMatch[0].length : 0);
-            if (wordEnd > wordStart) {
-              try {
-                const wordRange = doc.createRange();
-                wordRange.setStart(range.startContainer, wordStart);
-                wordRange.setEnd(range.startContainer, wordEnd);
-                rawRect = wordRange.getBoundingClientRect();
-                sel.removeAllRanges();
-                sel.addRange(wordRange);
-              } catch {
-                // ignore
-              }
-            }
-          }
 
-          const frameEl = doc.defaultView?.frameElement as HTMLElement | null;
-          const frameRect = frameEl?.getBoundingClientRect() || new DOMRect(0, 0, 0, 0);
-          const viewportRect = new DOMRect(
-            frameRect.left + (rawRect.width ? rawRect.left : e.clientX),
-            frameRect.top + (rawRect.height ? rawRect.top : e.clientY - 12),
-            rawRect.width || 24,
-            rawRect.height || 20,
-          );
-          pick.rects = [viewportRect];
-          this.notifyPick(pick);
+        const pick = pickTextFromPoint(e.clientX, e.clientY, doc);
+        if (pick && pick.text) {
+          this.activePickedWord = pick.text;
+          emitViewportPick(pick, e.clientX, e.clientY);
+        } else {
+          this.activePickedWord = '';
+          this.notifyPick({
+            text: '',
+            sentence: '',
+            leftContext: '',
+            rightContext: '',
+            offsetInSentence: 0,
+            rects: [],
+          });
         }
       }
     });
+  }
+
+  clearActivePick(): void {
+    this.activePickedWord = '';
+    try {
+      const contents = this.viewElement?.renderer?.getContents?.() || [];
+      for (const content of contents) {
+        content.doc?.getSelection?.()?.removeAllRanges?.();
+      }
+    } catch {
+      // ignore
+    }
   }
 
   private notifyPick(pick: TextPick): void {

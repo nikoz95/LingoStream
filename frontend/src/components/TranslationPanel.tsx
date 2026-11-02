@@ -66,7 +66,7 @@ export default function TranslationPanel({
   };
 
   return (
-    <div className="w-80 lg:w-96 bg-gray-900/90 backdrop-blur-xl border border-white/10 rounded-2xl shadow-2xl p-5 text-white animate-fadeIn flex flex-col gap-4">
+    <div className="w-full sm:w-80 lg:w-96 bg-gray-900/90 backdrop-blur-xl border border-white/10 rounded-2xl shadow-2xl p-4 sm:p-5 text-white animate-fadeIn flex flex-col gap-4">
       {/* Header */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">

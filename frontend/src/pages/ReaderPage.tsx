@@ -445,12 +445,16 @@ export default function ReaderPage() {
   }, [isEpubMode]);
 
   // ── EPUB Text Pick Handler (stable callback so EpubViewer never re-inits) ──
-  // Stages the picked word/passage and shows an inline floating Translate button right above it.
+  // Stages the picked word/passage and shows the "თარგმნა" button without auto-translating,
+  // waiting for the user to click "თარგმნა".
   const handleEpubTextPick = useCallback(
     (pick: TextPick) => {
       const cleaned = pick.text.trim();
       if (!cleaned) {
+        closeTranslation();
+        setEpubPickedText('');
         setTranslateIconPos(null);
+        setShowMobileTranslation(false);
         return;
       }
       closeTranslation();
@@ -462,12 +466,20 @@ export default function ReaderPage() {
       setSavedToVocabulary(false);
       setShowSidebar(true);
 
-      const rect = pick.rects?.[0];
-      if (rect) {
-        setTranslateIconPos({
-          top: Math.max(68, rect.top - 36),
-          left: Math.min(window.innerWidth - 80, Math.max(80, rect.left + rect.width / 2)),
-        });
+      const isMobileNow = window.innerWidth < 768 || 'ontouchstart' in window;
+      if (isMobileNow) {
+        // On mobile: we show a dedicated sticky floating action bar at the bottom of the screen
+        // with the picked word/sentence and a big "თარგმნა" button so it never disappears on tap
+        setTranslateIconPos(null);
+        setShowMobileTranslation(false);
+      } else {
+        const rect = pick.rects?.[0];
+        if (rect) {
+          setTranslateIconPos({
+            top: Math.max(68, rect.top - 36),
+            left: Math.min(window.innerWidth - 80, Math.max(80, rect.left + rect.width / 2)),
+          });
+        }
       }
     },
     [closeTranslation],
@@ -475,13 +487,17 @@ export default function ReaderPage() {
 
   // ── EPUB Relocate Handler ──
   const handleEpubRelocate = useCallback((info: EpubRelocateInfo) => {
+    closeTranslation();
+    epubViewerRef.current?.clearActivePick();
     setTranslateIconPos(null);
+    setEpubPickedText('');
+    setShowMobileTranslation(false);
     setEpubFraction(info.fraction);
     setEpubPageInfo({ current: info.currentPage, total: info.totalPages });
     if (info.chapterTitle) {
       setEpubChapterTitle(info.chapterTitle);
     }
-  }, []);
+  }, [closeTranslation]);
 
   // ── Auto-clear translation panel on new PDF selection ──
   useEffect(() => {
@@ -538,11 +554,29 @@ export default function ReaderPage() {
   const handleCloseTranslation = useCallback(() => {
     closeTranslation();
     clearSelection();
+    epubViewerRef.current?.clearActivePick();
     setEpubPickedText('');
     setTranslateIconPos(null);
     setSavedToVocabulary(false);
     setShowMobileTranslation(false);
   }, [closeTranslation, clearSelection]);
+
+  // ── Dismiss open translation / action bar when clicking outside on main document ──
+  const floatingUiRef = useRef<HTMLDivElement>(null);
+  const hasActiveTranslation = Boolean(activeSelectedText || translationResult || wordResult || translating);
+  useEffect(() => {
+    if (!hasActiveTranslation && !showMobileTranslation) return;
+    const onPointerDownOutside = (e: PointerEvent) => {
+      const target = e.target as HTMLElement | null;
+      if (!target) return;
+      if (floatingUiRef.current?.contains(target)) return;
+      if (target.closest('header')) return;
+      if (target.closest('foliate-view')) return;
+      handleCloseTranslation();
+    };
+    window.addEventListener('pointerdown', onPointerDownOutside);
+    return () => window.removeEventListener('pointerdown', onPointerDownOutside);
+  }, [hasActiveTranslation, showMobileTranslation, handleCloseTranslation]);
 
   const handleSaveToVocabulary = useCallback(async () => {
     if (!wordResult || !bookId) return;
@@ -799,10 +833,8 @@ export default function ReaderPage() {
     );
   }
 
-  const hasActiveTranslation = Boolean(activeSelectedText || translationResult || wordResult || translating);
-
   return (
-    <div className={`h-screen flex flex-col ${theme === 'sepia' ? 'theme-sepia' : 'theme-night'}`}>
+    <div className={`h-[100dvh] overflow-hidden flex flex-col ${theme === 'sepia' ? 'theme-sepia' : 'theme-night'}`}>
       <ReaderHeader
         title={pdfBook?.title || 'E-Reader'}
         chapterTitle={epubChapterTitle}
@@ -974,7 +1006,8 @@ export default function ReaderPage() {
 
           {/* Floating page/progress navigation (bottom-right) */}
           <div
-            className="fixed bottom-5 right-6 z-30 flex items-center gap-2 select-none"
+            className="fixed right-4 z-30 flex items-center gap-2 select-none"
+            style={{ bottom: 'max(14px, calc(env(safe-area-inset-bottom) + 6px))' }}
           >
             <div className="glass rounded-xl px-3 py-1.5 flex items-center gap-2 text-xs shadow-xl border border-white/10">
               <span className="text-white/80 tabular-nums font-medium">
@@ -1021,89 +1054,139 @@ export default function ReaderPage() {
           />
         )}
 
-        {/* Floating Translate Button right at the selected word/phrase (both EPUB & PDF) */}
-        {translateIconPos && activeSelectedText && !translationResult && !wordResult && !translating && (
-          <button
-            onClick={handleTranslate}
-            className="fixed z-50 px-3 py-1.5 rounded-full bg-purple-600 hover:bg-purple-500 text-white text-xs font-semibold shadow-xl shadow-purple-900/40 border border-purple-400/30 flex items-center gap-1.5 transition-all duration-150 hover:scale-105 cursor-pointer"
-            style={{
-              top: `${translateIconPos.top}px`,
-              left: `${translateIconPos.left}px`,
-              transform: 'translate(-50%, -50%)',
-            }}
-            title="თარგმნა"
-          >
-            <svg className="w-3.5 h-3.5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M3 5h12M9 3v2m1.048 9.5A18.022 18.022 0 016.412 9m6.088 9h7M11 21l5-10 5 10M12.751 5C11.783 10.77 8.07 15.61 3 18.129"
-              />
-            </svg>
-            <span>თარგმნა</span>
-          </button>
-        )}
+        {/* Floating / Mobile Translation Overlays Container */}
+        <div ref={floatingUiRef}>
+          {/* Floating Translate Button right at the selected word/phrase (Desktop) */}
+          {translateIconPos && activeSelectedText && !translationResult && !wordResult && !translating && (
+            <button
+              onClick={handleTranslate}
+              className="fixed z-50 px-3 py-1.5 rounded-full bg-purple-600 hover:bg-purple-500 text-white text-xs font-semibold shadow-xl shadow-purple-900/40 border border-purple-400/30 flex items-center gap-1.5 transition-all duration-150 hover:scale-105 cursor-pointer"
+              style={{
+                top: `${translateIconPos.top}px`,
+                left: `${translateIconPos.left}px`,
+                transform: 'translate(-50%, -50%)',
+              }}
+              title="თარგმნა"
+            >
+              <svg className="w-3.5 h-3.5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M3 5h12M9 3v2m1.048 9.5A18.022 18.022 0 016.412 9m6.088 9h7M11 21l5-10 5 10M12.751 5C11.783 10.77 8.07 15.61 3 18.129"
+                />
+              </svg>
+              <span>თარგმნა</span>
+            </button>
+          )}
 
-        {/* Desktop Floating Translation Widget (Right Side) */}
-        {!isMobile && showSidebar && hasActiveTranslation && (
-          <div className="fixed right-6 top-20 z-40 max-h-[80vh] overflow-y-auto">
-            <TranslationPanel
-              selectedText={activeSelectedText}
-              translationResult={translationResult}
-              wordResult={wordResult}
-              translationError={translationError}
-              translating={translating}
-              onTranslate={handleTranslate}
-              onClose={handleCloseTranslation}
-              onSaveToVocabulary={handleSaveToVocabulary}
-              savedToVocabulary={savedToVocabulary}
-              existingWord={existingWord}
-              checkingExisting={checkingExisting}
-              onVocabularyUpdated={onVocabularyUpdated}
-            />
-          </div>
-        )}
-
-        {/* Mobile Translation Bottom Sheet */}
-        {isMobile && showMobileTranslation && (
-          <div className="fixed inset-x-0 bottom-0 z-50">
+          {/* Mobile Floating "თარგმნა" Action Bar (appears when tapping a word or selecting a sentence) */}
+          {isMobile && activeSelectedText && !showMobileTranslation && !translationResult && !wordResult && !translating && (
             <div
-              className="fixed inset-0 bg-black/60 backdrop-blur-sm mobile-bottom-sheet-backdrop"
-              onClick={handleCloseTranslation}
-            />
-
-            <div className="relative bg-gray-900 rounded-t-2xl border-t border-white/10 shadow-2xl max-h-[70vh] overflow-y-auto mobile-bottom-sheet">
-              <div className="sticky top-0 bg-gray-900 pt-3 pb-2 px-4 flex items-center justify-between border-b border-white/10">
-                <span className="text-sm font-semibold opacity-70 uppercase tracking-wider">Translation</span>
+              className="fixed inset-x-3 z-50 animate-fadeIn flex items-center justify-between gap-2.5 bg-gray-900/95 backdrop-blur-xl border border-purple-500/40 rounded-2xl px-3.5 py-2.5 shadow-2xl shadow-black/70"
+              style={{ bottom: 'max(14px, calc(env(safe-area-inset-bottom) + 6px))' }}
+            >
+              <div className="min-w-0 flex-1">
+                <span className="text-[10px] uppercase tracking-wider text-purple-300/80 font-semibold block">
+                  {activeSelectedText.split(/\s+/).length > 1 ? 'მონიშნული წინადადება' : 'მონიშნული სიტყვა'}
+                </span>
+                <p className="text-xs sm:text-sm text-white font-medium truncate">
+                  "{activeSelectedText}"
+                </p>
+              </div>
+              <div className="flex items-center gap-1.5 flex-shrink-0">
+                <button
+                  onClick={handleTranslate}
+                  className="px-4 py-2 rounded-xl bg-purple-600 active:bg-purple-500 text-white text-xs font-bold shadow-lg shadow-purple-600/40 flex items-center gap-1.5"
+                >
+                  <svg className="w-3.5 h-3.5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M3 5h12M9 3v2m1.048 9.5A18.022 18.022 0 016.412 9m6.088 9h7M11 21l5-10 5 10M12.751 5C11.783 10.77 8.07 15.61 3 18.129"
+                    />
+                  </svg>
+                  <span>თარგმნა</span>
+                </button>
                 <button
                   onClick={handleCloseTranslation}
-                  className="p-1 rounded-lg hover:bg-white/10 transition-colors"
+                  className="p-2 rounded-xl bg-white/5 active:bg-white/15 text-white/60"
+                  title="დახურვა"
                 >
-                  <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
                   </svg>
                 </button>
               </div>
-              <div className="p-4">
-                <TranslationPanel
-                  selectedText={activeSelectedText}
-                  translationResult={translationResult}
-                  wordResult={wordResult}
-                  translationError={translationError}
-                  translating={translating}
-                  onTranslate={handleTranslate}
-                  onClose={handleCloseTranslation}
-                  onSaveToVocabulary={handleSaveToVocabulary}
-                  savedToVocabulary={savedToVocabulary}
-                  existingWord={existingWord}
-                  checkingExisting={checkingExisting}
-                  onVocabularyUpdated={onVocabularyUpdated}
-                />
+            </div>
+          )}
+
+          {/* Desktop Floating Translation Widget (Right Side) */}
+          {!isMobile && showSidebar && hasActiveTranslation && (
+            <div className="fixed right-6 top-20 z-40 max-h-[80vh] overflow-y-auto">
+              <TranslationPanel
+                selectedText={activeSelectedText}
+                translationResult={translationResult}
+                wordResult={wordResult}
+                translationError={translationError}
+                translating={translating}
+                onTranslate={handleTranslate}
+                onClose={handleCloseTranslation}
+                onSaveToVocabulary={handleSaveToVocabulary}
+                savedToVocabulary={savedToVocabulary}
+                existingWord={existingWord}
+                checkingExisting={checkingExisting}
+                onVocabularyUpdated={onVocabularyUpdated}
+              />
+            </div>
+          )}
+
+          {/* Mobile Translation Bottom Sheet */}
+          {isMobile && showMobileTranslation && (
+            <div className="fixed inset-x-0 bottom-0 z-50 animate-slideUp">
+              <div
+                className="fixed inset-0 bg-black/50 backdrop-blur-[2px] mobile-bottom-sheet-backdrop"
+                onClick={handleCloseTranslation}
+              />
+
+              <div className="relative bg-gray-900/95 backdrop-blur-xl rounded-t-3xl border-t border-white/15 shadow-2xl max-h-[78dvh] overflow-y-auto mobile-bottom-sheet pb-[max(16px,env(safe-area-inset-bottom))]">
+                <div className="sticky top-0 z-10 bg-gray-900/95 pt-2.5 pb-2 px-4 flex flex-col items-center border-b border-white/10">
+                  <div className="w-10 h-1 rounded-full bg-white/20 mb-2" />
+                  <div className="w-full flex items-center justify-between">
+                    <span className="text-xs font-bold opacity-80 uppercase tracking-wider text-purple-300">
+                      {wordResult || translationResult ? 'თარგმანი' : 'მონიშნული ტექსტი'}
+                    </span>
+                    <button
+                      onClick={handleCloseTranslation}
+                      className="p-1.5 rounded-xl bg-white/5 hover:bg-white/15 transition-colors"
+                    >
+                      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                      </svg>
+                    </button>
+                  </div>
+                </div>
+                <div className="p-3 sm:p-4 flex justify-center">
+                  <TranslationPanel
+                    selectedText={activeSelectedText}
+                    translationResult={translationResult}
+                    wordResult={wordResult}
+                    translationError={translationError}
+                    translating={translating}
+                    onTranslate={handleTranslate}
+                    onClose={handleCloseTranslation}
+                    onSaveToVocabulary={handleSaveToVocabulary}
+                    savedToVocabulary={savedToVocabulary}
+                    existingWord={existingWord}
+                    checkingExisting={checkingExisting}
+                    onVocabularyUpdated={onVocabularyUpdated}
+                  />
+                </div>
               </div>
             </div>
-          </div>
-        )}
+          )}
+        </div>
       </div>
 
       {/* Reader Settings Modal */}

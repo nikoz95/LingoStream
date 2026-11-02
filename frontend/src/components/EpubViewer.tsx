@@ -15,6 +15,7 @@ export interface EpubViewerHandle {
   prevPage: () => void;
   goToFraction: (fraction: number) => void;
   goToHref: (href: string) => void;
+  clearActivePick: () => void;
 }
 
 interface EpubViewerProps {
@@ -97,6 +98,9 @@ const EpubViewer = forwardRef<EpubViewerHandle, EpubViewerProps>(function EpubVi
       },
       goToHref: (href: string) => {
         engineRef.current?.goToHref(href);
+      },
+      clearActivePick: () => {
+        engineRef.current?.clearActivePick();
       },
     }),
     [],
