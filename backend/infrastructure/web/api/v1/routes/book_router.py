@@ -274,7 +274,23 @@ async def get_book_file(
 
     key = book.file_path
     if format == "epub" and key.endswith(".pdf"):
-        key = key[:-4] + ".epub"
+        epub_key = key[:-4] + ".epub"
+        try:
+            data = storage_service.get_file_bytes(epub_key)
+            return Response(content=data, media_type="application/epub+zip")
+        except Exception:
+            # Convert on-the-fly if EPUB is missing in MinIO and cache it
+            try:
+                pdf_bytes = storage_service.get_file_bytes(key)
+                epub_bytes = PdfToEpubConverter.convert(pdf_bytes, book.title, book.author)
+                storage_service.upload_bytes(epub_bytes, epub_key, "application/epub+zip")
+                return Response(content=epub_bytes, media_type="application/epub+zip")
+            except Exception as conv_exc:
+                logger.error("Failed on-the-fly PDF->EPUB conversion (%s): %s", key, conv_exc)
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail="Failed to convert PDF to EPUB",
+                )
 
     try:
         data = storage_service.get_file_bytes(key)

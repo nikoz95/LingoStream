@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useAuth } from '../lib/auth';
-import { saveVocabularyWord } from '../lib/api';
+import { saveVocabularyWord, getBookBlob } from '../lib/api';
 import { usePdfDocument } from '../hooks/usePdfDocument';
 import { useContainerWidth } from '../hooks/useContainerWidth';
 import { useClickSelection } from '../hooks/useClickSelection';
@@ -17,9 +17,16 @@ import TranslationPanel from '../components/TranslationPanel';
 import ThumbnailSidebar from '../components/ThumbnailSidebar';
 import SearchPanel from '../components/SearchPanel';
 import PageRenderer from '../components/PageRenderer';
-
+import EpubViewer, { type EpubViewerHandle } from '../components/EpubViewer';
 import SettingsModal from '../components/SettingsModal';
-import { getBookBlob } from '../lib/api';
+import type {
+  EpubFontFamily,
+  EpubLayoutMode,
+  EpubRelocateInfo,
+  EpubTheme,
+} from '../lib/reader/EpubEngine';
+import type { TocItem } from '../lib/reader/types';
+import type { TextPick } from '../lib/textPicker';
 
 const PAGE_GAP = 24;
 const MIN_ZOOM = 0.5;
@@ -34,38 +41,137 @@ export default function ReaderPage() {
   // ── Core refs ──
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const spreadContainerRef = useRef<HTMLDivElement>(null);
+  const epubViewerRef = useRef<EpubViewerHandle>(null);
   const pageNumberRefs = useRef<Map<number, HTMLDivElement>>(new Map());
   const isScrollingRef = useRef(false);
   const wordPositionsLoadingRef = useRef<Set<number>>(new Set());
 
-  // ── Word positions cache ──
+  // ── Word positions cache (for PDF fallback) ──
   const [wordPositionsCache, setWordPositionsCache] = useState<Record<number, any>>({});
 
-  // ── PDF Document ──
+  // ── PDF Document (also loads book metadata) ──
   const {
     book: pdfBook,
     loading: pdfLoading,
     error: pdfError,
     numPages,
     documentRef: pdfDocument,
-    onLoadSuccess,
-    onLoadError,
   } = usePdfDocument(bookId);
 
-  // ── Native browser text selection (react-pdf TextLayer) ──
+  // ── EPUB Mode & Practical Reading Options (Default: EPUB!) ──
+  const [isEpubMode, setIsEpubMode] = useState(true);
+  const [epubBlob, setEpubBlob] = useState<Blob | null>(null);
+  const [epubLoading, setEpubLoading] = useState(true);
+  const [epubToc, setEpubToc] = useState<TocItem[]>([]);
+  const [epubChapterTitle, setEpubChapterTitle] = useState('');
+  const [epubFraction, setEpubFraction] = useState(0);
+  const [epubPageInfo, setEpubPageInfo] = useState({ current: 1, total: 100 });
+
+  // Typography & Layout Preferences (persisted in localStorage)
+  const [epubLayout, setEpubLayout] = useState<EpubLayoutMode>(
+    () => (localStorage.getItem('ls_epub_layout') as EpubLayoutMode) || 'paginated-single',
+  );
+  const [theme, setTheme] = useState<EpubTheme>(
+    () => (localStorage.getItem('ls_epub_theme') as EpubTheme) || 'night',
+  );
+  const [readerFontSize, setReaderFontSize] = useState(
+    () => Number(localStorage.getItem('ls_font_size')) || 110,
+  );
+  const [fontFamily, setFontFamily] = useState<EpubFontFamily>(
+    () => (localStorage.getItem('ls_font_family') as EpubFontFamily) || 'literata',
+  );
+  const [lineHeight, setLineHeight] = useState(
+    () => Number(localStorage.getItem('ls_line_height')) || 1.75,
+  );
+  const [maxWidth, setMaxWidth] = useState(
+    () => Number(localStorage.getItem('ls_max_width')) || 780,
+  );
+
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [targetLang, setTargetLang] = useState(() => localStorage.getItem('ls_target_lang') || 'ka');
+
+  // Handlers for persisting EPUB reading options
+  const handleEpubLayoutChange = useCallback((layout: EpubLayoutMode) => {
+    setEpubLayout(layout);
+    localStorage.setItem('ls_epub_layout', layout);
+  }, []);
+
+  const handleThemeChange = useCallback((newTheme: EpubTheme) => {
+    setTheme(newTheme);
+    localStorage.setItem('ls_epub_theme', newTheme);
+  }, []);
+
+  const handleFontSizeChange = useCallback((size: number) => {
+    setReaderFontSize(size);
+    localStorage.setItem('ls_font_size', String(size));
+  }, []);
+
+  const handleFontFamilyChange = useCallback((family: EpubFontFamily) => {
+    setFontFamily(family);
+    localStorage.setItem('ls_font_family', family);
+  }, []);
+
+  const handleLineHeightChange = useCallback((lh: number) => {
+    setLineHeight(lh);
+    localStorage.setItem('ls_line_height', String(lh));
+  }, []);
+
+  const handleMaxWidthChange = useCallback((w: number) => {
+    setMaxWidth(w);
+    localStorage.setItem('ls_max_width', String(w));
+  }, []);
+
+  const handleTargetLangChange = useCallback((lang: string) => {
+    setTargetLang(lang);
+    localStorage.setItem('ls_target_lang', lang);
+  }, []);
+
+  // Load EPUB blob from backend (MinIO)
+  useEffect(() => {
+    if (!bookId || !isEpubMode) return;
+    let cancelled = false;
+    setEpubLoading(true);
+    getBookBlob(Number(bookId), 'epub')
+      .then((blob) => {
+        if (!cancelled) {
+          setEpubBlob(blob);
+          setEpubLoading(false);
+        }
+      })
+      .catch((err) => {
+        console.warn('EPUB fetch failed, falling back to PDF view:', err);
+        if (!cancelled) {
+          setEpubLoading(false);
+          setIsEpubMode(false);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [bookId, isEpubMode]);
+
+  // ── Native browser text selection (for PDF fallback) ──
   const {
-    selectedText,
+    selectedText: pdfSelectedText,
     selectionRect,
     isWordClick,
-    leftContext,
-    rightContext,
+    leftContext: pdfLeftContext,
+    rightContext: pdfRightContext,
     clearSelection,
     selectWord,
   } = useClickSelection({
     containerRef: scrollContainerRef,
     wordPositionsCache,
-    enabled: true,
+    enabled: !isEpubMode,
   });
+
+  // Active selection text (works for both EPUB and PDF)
+  const [epubPickedText, setEpubPickedText] = useState('');
+  const [epubPickedContext, setEpubPickedContext] = useState<{ left: string; right: string }>({
+    left: '',
+    right: '',
+  });
+  const activeSelectedText = isEpubMode ? epubPickedText : pdfSelectedText;
 
   const {
     translating,
@@ -78,29 +184,9 @@ export default function ReaderPage() {
     closeTranslation,
     existingWord,
     checkingExisting,
-    savedVocabularyId,
     onVocabularySaved,
     onVocabularyUpdated,
   } = useTranslation(pdfBook, bookId);
-
-  // ── Settings & E-Reader State ──
-  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
-  const [targetLang, setTargetLang] = useState(() => localStorage.getItem('ls_target_lang') || 'ka');
-  const [readerFontSize, setReaderFontSize] = useState(() => Number(localStorage.getItem('ls_font_size')) || 100);
-  
-  
-
-
-
-  const handleTargetLangChange = (lang: string) => {
-    setTargetLang(lang);
-    localStorage.setItem('ls_target_lang', lang);
-  };
-
-  const handleFontSizeChange = (size: number) => {
-    setReaderFontSize(size);
-    localStorage.setItem('ls_font_size', String(size));
-  };
 
   const [savedToVocabulary, setSavedToVocabulary] = useState(false);
   const [translateIconPos, setTranslateIconPos] = useState<{ top: number; left: number } | null>(null);
@@ -124,8 +210,7 @@ export default function ReaderPage() {
 
   // ── Core state ──
   const [currentPage, setCurrentPage] = useState(1);
-  const [theme, setTheme] = useState<'sepia' | 'night'>('night');
-  const [showSidebar, setShowSidebar] = useState(!isMobile);
+  const [showSidebar, setShowSidebar] = useState(true);
   const [zoomLevel, setZoomLevel] = useState(isMobile ? 0.7 : 1.0);
   const [viewMode, setViewMode] = useState<ViewMode>('scroll');
 
@@ -133,44 +218,30 @@ export default function ReaderPage() {
 
   const { ref: containerWidthRef, width: containerWidth } = useContainerWidth();
 
-  // ── Word positions (backend-extracted click zones) ──
+  // ── Word positions (backend-extracted click zones for PDF mode) ──
   const {
     getPositions: getWordPositionsForPage,
-    loading: wordPositionsLoading,
-    error: wordPositionsError,
-    preloadRange: preloadWordPositions,
-    clearCache: clearWordPositionsCache,
   } = useWordPositions(bookId ? Number(bookId) : null);
 
-  // Fetch word positions for the current page + buffer
   useEffect(() => {
-    if (!numPages || !bookId) return;
+    if (isEpubMode || !numPages || !bookId) return;
     const start = Math.max(0, currentPage - 2);
     const end = Math.min(numPages, currentPage + 3);
     for (let i = start; i <= end; i++) {
       const pageIdx = i - 1;
       if (!wordPositionsCache[pageIdx] && !wordPositionsLoadingRef.current.has(pageIdx)) {
         wordPositionsLoadingRef.current.add(pageIdx);
-        getWordPositionsForPage(pageIdx).then(data => {
+        getWordPositionsForPage(pageIdx).then((data) => {
           wordPositionsLoadingRef.current.delete(pageIdx);
           if (data) {
-            setWordPositionsCache(prev => ({ ...prev, [pageIdx]: data }));
+            setWordPositionsCache((prev) => ({ ...prev, [pageIdx]: data }));
           }
         });
       }
     }
-  }, [currentPage, numPages, bookId, getWordPositionsForPage, wordPositionsCache]);
+  }, [isEpubMode, currentPage, numPages, bookId, getWordPositionsForPage, wordPositionsCache]);
 
-  // ── Dark mode detection ──
-  useEffect(() => {
-    const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
-    setTheme(prefersDark ? 'night' : 'sepia');
-    const listener = (e: MediaQueryListEvent) => setTheme(e.matches ? 'night' : 'sepia');
-    window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', listener);
-    return () => window.matchMedia('(prefers-color-scheme: dark)').removeEventListener('change', listener);
-  }, []);
-
-  // ── Reading progress ──
+  // ── Reading progress (for PDF fallback) ──
   const {
     containerRef: progressContainerRef,
     saveProgress,
@@ -185,7 +256,6 @@ export default function ReaderPage() {
     currentMatchIndex,
     searching,
     error: searchError,
-    currentMatch,
     debouncedSearch,
     nextMatch,
     prevMatch,
@@ -195,48 +265,117 @@ export default function ReaderPage() {
   const [showSearch, setShowSearch] = useState(false);
 
   const toggleSearch = useCallback(() => {
-    setShowSearch(prev => !prev);
+    setShowSearch((prev) => !prev);
   }, []);
 
-  const runSearch = useCallback((q: string) => {
-    debouncedSearch(q);
-  }, [debouncedSearch]);
+  const runSearch = useCallback(
+    (q: string) => {
+      debouncedSearch(q);
+    },
+    [debouncedSearch],
+  );
 
-  const goToMatch = useCallback((direction: 'next' | 'prev') => {
-    if (direction === 'next') nextMatch();
-    else prevMatch();
-  }, [nextMatch, prevMatch]);
+  const goToMatch = useCallback(
+    (direction: 'next' | 'prev') => {
+      if (direction === 'next') nextMatch();
+      else prevMatch();
+    },
+    [nextMatch, prevMatch],
+  );
 
-  const setQuery = useCallback((q: string) => {
-    debouncedSearch(q);
-  }, [debouncedSearch]);
+  const setQuery = useCallback(
+    (q: string) => {
+      debouncedSearch(q);
+    },
+    [debouncedSearch],
+  );
 
-  // Restore progress once when PDF initially loads
+  // Restore PDF progress when in PDF mode
   const restoredRef = useRef(false);
   useEffect(() => {
-    if (numPages && numPages > 0 && !pdfLoading && !restoredRef.current) {
+    if (!isEpubMode && numPages && numPages > 0 && !pdfLoading && !restoredRef.current) {
       restoredRef.current = true;
       scrollToSaved();
     }
-  }, [numPages, pdfLoading, scrollToSaved]);
+  }, [isEpubMode, numPages, pdfLoading, scrollToSaved]);
 
-  // ── Page tracking: deterministic based on scroll position ──
-  // IntersectionObserver is omitted because ratio dips when scrolling across page boundaries,
-  // causing the current page number to jump backwards (e.g. 7 -> 6 -> 8).
+  const observePageRef = useCallback(
+    (pageNum: number) => (el: HTMLDivElement | null) => {
+      if (el) {
+        pageNumberRefs.current.set(pageNum, el);
+      } else {
+        pageNumberRefs.current.delete(pageNum);
+      }
+    },
+    [],
+  );
 
-  // Observe page refs as they mount
-  const observePageRef = useCallback((pageNum: number) => (el: HTMLDivElement | null) => {
-    if (el) {
-      pageNumberRefs.current.set(pageNum, el);
+  // ── Scroll to PDF page helper ──
+  const scrollTimeoutRef = useRef<number | null>(null);
+
+  const scrollToPage = useCallback(
+    (page: number) => {
+      if (isEpubMode) {
+        const total = epubPageInfo.total || 100;
+        const frac = Math.max(0, Math.min(1, (page - 1) / total));
+        epubViewerRef.current?.goToFraction(frac);
+        return;
+      }
+      if (!numPages) return;
+      const clamped = Math.max(1, Math.min(page, numPages));
+      setCurrentPage(clamped);
+      isScrollingRef.current = true;
+      if (scrollTimeoutRef.current) window.clearTimeout(scrollTimeoutRef.current);
+      scrollTimeoutRef.current = window.setTimeout(() => {
+        isScrollingRef.current = false;
+      }, 800);
+
+      if (viewMode === 'spread' && spreadContainerRef.current) {
+        const pairIndex = Math.floor((clamped - 1) / 2);
+        const spreadEl = spreadContainerRef.current;
+        const spreadChildren = spreadEl.children;
+        for (let i = 0; i < spreadChildren.length; i++) {
+          const child = spreadChildren[i] as HTMLElement;
+          if (child.dataset && child.dataset.pairIndex === String(pairIndex)) {
+            requestAnimationFrame(() => {
+              child.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            });
+            return;
+          }
+        }
+      }
+
+      const el =
+        pageNumberRefs.current.get(clamped) ||
+        scrollContainerRef.current?.querySelector<HTMLElement>(`[data-page-number="${clamped}"]`);
+      if (el) {
+        el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }
+    },
+    [isEpubMode, epubPageInfo.total, numPages, viewMode],
+  );
+
+  // ── Unified Prev / Next Page actions (works for both EPUB and PDF) ──
+  const handlePrevPage = useCallback(() => {
+    if (isEpubMode) {
+      epubViewerRef.current?.prevPage();
     } else {
-      pageNumberRefs.current.delete(pageNum);
+      scrollToPage(currentPage - 1);
     }
-  }, []);
+  }, [isEpubMode, currentPage, scrollToPage]);
+
+  const handleNextPage = useCallback(() => {
+    if (isEpubMode) {
+      epubViewerRef.current?.nextPage();
+    } else {
+      scrollToPage(currentPage + 1);
+    }
+  }, [isEpubMode, currentPage, scrollToPage]);
 
   // ── Keyboard shortcuts ──
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      if ((e.ctrlKey || e.metaKey) && e.key === 'f') {
+      if ((e.ctrlKey || e.metaKey) && e.key === 'f' && !isEpubMode) {
         e.preventDefault();
         toggleSearch();
         return;
@@ -254,68 +393,31 @@ export default function ReaderPage() {
         case 'ArrowRight':
         case 'PageDown':
           e.preventDefault();
-          isScrollingRef.current = true;
-          scrollToPage(currentPage + 1);
+          handleNextPage();
           break;
         case 'ArrowLeft':
         case 'PageUp':
           e.preventDefault();
-          isScrollingRef.current = true;
-          scrollToPage(currentPage - 1);
+          handlePrevPage();
           break;
         case 'Home':
           e.preventDefault();
-          isScrollingRef.current = true;
-          scrollToPage(1);
+          if (isEpubMode) epubViewerRef.current?.goToFraction(0);
+          else scrollToPage(1);
           break;
         case 'End':
           e.preventDefault();
-          isScrollingRef.current = true;
-          scrollToPage(numPages || 1);
+          if (isEpubMode) epubViewerRef.current?.goToFraction(1);
+          else scrollToPage(numPages || 1);
           break;
       }
     };
 
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [currentPage, numPages, showSearch, toggleSearch]);
+  }, [isEpubMode, showSearch, toggleSearch, handleNextPage, handlePrevPage, scrollToPage, numPages]);
 
-  // ── Scroll to page helper ──
-  const scrollTimeoutRef = useRef<number | null>(null);
-
-  const scrollToPage = useCallback((page: number) => {
-    if (!numPages) return;
-    const clamped = Math.max(1, Math.min(page, numPages));
-    setCurrentPage(clamped);
-    isScrollingRef.current = true;
-    if (scrollTimeoutRef.current) window.clearTimeout(scrollTimeoutRef.current);
-    scrollTimeoutRef.current = window.setTimeout(() => {
-      isScrollingRef.current = false;
-    }, 800);
-
-    if (viewMode === 'spread' && spreadContainerRef.current) {
-      const pairIndex = Math.floor((clamped - 1) / 2);
-      const spreadEl = spreadContainerRef.current;
-      const spreadChildren = spreadEl.children;
-      for (let i = 0; i < spreadChildren.length; i++) {
-        const child = spreadChildren[i] as HTMLElement;
-        if (child.dataset && child.dataset.pairIndex === String(pairIndex)) {
-          requestAnimationFrame(() => {
-            child.scrollIntoView({ behavior: 'smooth', block: 'start' });
-          });
-          return;
-        }
-      }
-    }
-
-    const el = pageNumberRefs.current.get(clamped) || 
-      scrollContainerRef.current?.querySelector<HTMLElement>(`[data-page-number="${clamped}"]`);
-    if (el) {
-      el.scrollIntoView({ behavior: 'smooth', block: 'start' });
-    }
-  }, [numPages, viewMode]);
-
-  // ── Zoom with Ctrl+Wheel (non-passive listener to avoid preventDefault error) ──
+  // ── Zoom with Ctrl+Wheel (PDF mode) ──
   useEffect(() => {
     const container = scrollContainerRef.current;
     if (!container) return;
@@ -324,27 +426,75 @@ export default function ReaderPage() {
       if (!e.ctrlKey && !e.metaKey) return;
       e.preventDefault();
       e.stopPropagation();
-      setZoomLevel(prev => {
-        const delta = e.deltaY > 0 ? -ZOOM_STEP : ZOOM_STEP;
-        return Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, prev + delta));
-      });
+      if (isEpubMode) {
+        setReaderFontSize((prev) => {
+          const next = e.deltaY > 0 ? Math.max(70, prev - 10) : Math.min(180, prev + 10);
+          localStorage.setItem('ls_font_size', String(next));
+          return next;
+        });
+      } else {
+        setZoomLevel((prev) => {
+          const delta = e.deltaY > 0 ? -ZOOM_STEP : ZOOM_STEP;
+          return Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, prev + delta));
+        });
+      }
     };
 
     container.addEventListener('wheel', onWheel, { passive: false });
     return () => container.removeEventListener('wheel', onWheel);
+  }, [isEpubMode]);
+
+  // ── EPUB Text Pick Handler (stable callback so EpubViewer never re-inits) ──
+  // Stages the picked word/passage and shows an inline floating Translate button right above it.
+  const handleEpubTextPick = useCallback(
+    (pick: TextPick) => {
+      const cleaned = pick.text.trim();
+      if (!cleaned) {
+        setTranslateIconPos(null);
+        return;
+      }
+      closeTranslation();
+      setEpubPickedText(cleaned);
+      setEpubPickedContext({
+        left: pick.sentence || pick.leftContext || '',
+        right: pick.rightContext || '',
+      });
+      setSavedToVocabulary(false);
+      setShowSidebar(true);
+
+      const rect = pick.rects?.[0];
+      if (rect) {
+        setTranslateIconPos({
+          top: Math.max(68, rect.top - 36),
+          left: Math.min(window.innerWidth - 80, Math.max(80, rect.left + rect.width / 2)),
+        });
+      }
+    },
+    [closeTranslation],
+  );
+
+  // ── EPUB Relocate Handler ──
+  const handleEpubRelocate = useCallback((info: EpubRelocateInfo) => {
+    setTranslateIconPos(null);
+    setEpubFraction(info.fraction);
+    setEpubPageInfo({ current: info.currentPage, total: info.totalPages });
+    if (info.chapterTitle) {
+      setEpubChapterTitle(info.chapterTitle);
+    }
   }, []);
 
-  // ── Auto-clear translation panel on new selection ──
+  // ── Auto-clear translation panel on new PDF selection ──
   useEffect(() => {
-    if (selectedText) {
+    if (!isEpubMode && pdfSelectedText) {
       closeTranslation();
       setSavedToVocabulary(false);
     }
-  }, [selectedText]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [isEpubMode, pdfSelectedText, closeTranslation]);
 
-  // ── Floating translate icon position ──
+  // ── Floating translate icon position (PDF mode) ──
   useEffect(() => {
-    if (selectionRect && selectedText) {
+    if (isEpubMode) return;
+    if (selectionRect && pdfSelectedText) {
       setTranslateIconPos({
         top: selectionRect.top - 48,
         left: selectionRect.left + selectionRect.width / 2,
@@ -352,18 +502,44 @@ export default function ReaderPage() {
     } else {
       setTranslateIconPos(null);
     }
-  }, [selectionRect, selectedText]);
-
+  }, [isEpubMode, selectionRect, pdfSelectedText]);
 
   // ── Callbacks ──
   const handleTranslate = useCallback(() => {
-    translate(selectedText, isWordClick, leftContext, rightContext);
     setTranslateIconPos(null);
-  }, [translate, selectedText, isWordClick, leftContext, rightContext]);
+    if (isEpubMode) {
+      if (epubPickedText) {
+        const isSingleWord = epubPickedText.split(/\s+/).length <= 1;
+        translate(
+          epubPickedText,
+          isSingleWord,
+          epubPickedContext.left,
+          epubPickedContext.right,
+        );
+        if (isMobile) {
+          setShowMobileTranslation(true);
+        }
+      }
+    } else {
+      translate(pdfSelectedText, isWordClick, pdfLeftContext, pdfRightContext);
+    }
+  }, [
+    isEpubMode,
+    epubPickedText,
+    epubPickedContext,
+    translate,
+    isMobile,
+    pdfSelectedText,
+    isWordClick,
+    pdfLeftContext,
+    pdfRightContext,
+  ]);
 
   const handleCloseTranslation = useCallback(() => {
     closeTranslation();
     clearSelection();
+    setEpubPickedText('');
+    setTranslateIconPos(null);
     setSavedToVocabulary(false);
     setShowMobileTranslation(false);
   }, [closeTranslation, clearSelection]);
@@ -387,57 +563,58 @@ export default function ReaderPage() {
     }
   }, [wordResult, bookId, onVocabularySaved]);
 
-  const toggleTheme = useCallback(
-    () => setTheme(prev => (prev === 'sepia' ? 'night' : 'sepia')),
-    [],
-  );
-  const toggleSidebar = useCallback(
-    () => setShowSidebar(prev => !prev),
-    [],
-  );
+  const toggleTheme = useCallback(() => {
+    setTheme((prev) => {
+      const next = prev === 'night' ? 'sepia' : prev === 'sepia' ? 'light' : 'night';
+      localStorage.setItem('ls_epub_theme', next);
+      return next;
+    });
+  }, []);
+
+  const toggleSidebar = useCallback(() => setShowSidebar((prev) => !prev), []);
+
   const handleLogout = useCallback(() => {
     logout();
     navigate('/login');
   }, [logout, navigate]);
+
   const handleBack = useCallback(() => navigate('/library'), [navigate]);
 
-  const handleNavToPage = useCallback((page: number) => {
-    scrollToPage(page);
-  }, [scrollToPage]);
+  const handleNavToPage = useCallback(
+    (page: number) => {
+      scrollToPage(page);
+    },
+    [scrollToPage],
+  );
 
-  // ── Clear search highlights when search closes ──
   const handleCloseSearch = useCallback(() => {
     setShowSearch(false);
     clearSearch();
-    document.querySelectorAll('.search-highlight').forEach(el => {
+    document.querySelectorAll('.search-highlight').forEach((el) => {
       el.classList.remove('search-highlight');
     });
   }, [clearSearch]);
 
-    const [scrollProgress, setScrollProgress] = useState(0);
+  const [scrollProgress, setScrollProgress] = useState(0);
 
   const handleScroll = useCallback(() => {
+    if (isEpubMode) return;
     clearSelection();
     setTranslateIconPos(null);
 
     const container = scrollContainerRef.current;
     if (!container) return;
 
-    // 1. Progress Bar calculation
     const maxScroll = container.scrollHeight - container.clientHeight;
     if (maxScroll > 0) {
       const pct = (container.scrollTop / maxScroll) * 100;
       setScrollProgress(Math.min(100, Math.max(0, pct)));
     }
 
-    // 2. Active Page calculation for Scroll view
     const renderedPages = container.querySelectorAll<HTMLElement>('[data-page-number]');
     if (renderedPages.length > 0) {
       const cTop = container.scrollTop;
       let activeP = 1;
-
-      // Find which page is at the viewport reading level
-      // Each page element's offsetTop within the scrollable container
       const threshold = cTop + 150;
       for (let i = 0; i < renderedPages.length; i++) {
         const pageEl = renderedPages[i];
@@ -460,16 +637,21 @@ export default function ReaderPage() {
         });
       }
     }
-  }, [clearSelection, numPages, saveProgress]);
+  }, [isEpubMode, clearSelection, numPages, saveProgress]);
 
-  // ── Compute page dimensions ──
-  const pageWidth = viewMode === 'spread'
-    ? Math.min(containerWidth * 0.45 * zoomLevel, 600)
-    : Math.min(containerWidth, isMobile ? 1000 : 800) * zoomLevel;
+  // ── Compute page dimensions & progress ──
+  const pageWidth =
+    viewMode === 'spread'
+      ? Math.min(containerWidth * 0.45 * zoomLevel, 600)
+      : Math.min(containerWidth, isMobile ? 1000 : 800) * zoomLevel;
 
-  const progressPercent = viewMode === 'scroll' && scrollProgress > 0
-    ? scrollProgress
-    : (numPages ? (currentPage / numPages) * 100 : 0);
+  const progressPercent = isEpubMode
+    ? epubFraction * 100
+    : viewMode === 'scroll' && scrollProgress > 0
+      ? scrollProgress
+      : numPages
+        ? (currentPage / numPages) * 100
+        : 0;
 
   const isCurrentPage = (pageNum: number): boolean => {
     if (viewMode === 'scroll') return pageNum === currentPage;
@@ -483,7 +665,6 @@ export default function ReaderPage() {
     return false;
   };
 
-  // ── Build search state for SearchPanel ──
   const searchState = {
     query,
     matches,
@@ -493,21 +674,23 @@ export default function ReaderPage() {
     error: searchError,
   };
 
-  // ── MobileLoupe word selected handler ──
-  const handleLoupeWordSelected = useCallback((word: string, pageX: number, pageY: number) => {
-    // Set the word as selected via useClickSelection's selectWord
-    // Find which page the point is on
-    const elements = document.elementsFromPoint(pageX, pageY);
-    const pageEl = elements.find(el => el.closest('[data-page-number]'))?.closest('[data-page-number]') as HTMLElement | undefined;
-    const pageIndex = pageEl ? Number(pageEl.dataset.pageNumber) - 1 : 0;
+  const handleLoupeWordSelected = useCallback(
+    (word: string, pageX: number, pageY: number) => {
+      const elements = document.elementsFromPoint(pageX, pageY);
+      const pageEl = elements.find((el) => el.closest('[data-page-number]'))?.closest('[data-page-number]') as
+        | HTMLElement
+        | undefined;
+      const pageIndex = pageEl ? Number(pageEl.dataset.pageNumber) - 1 : 0;
 
-    selectWord(word, pageIndex, pageX, pageY);
-    translate(word, true, '', '');
-    setTranslateIconPos(null);
-    setShowMobileTranslation(true);
-  }, [translate, selectWord]);
+      selectWord(word, pageIndex, pageX, pageY);
+      translate(word, true, '', '');
+      setTranslateIconPos(null);
+      setShowMobileTranslation(true);
+    },
+    [translate, selectWord],
+  );
 
-  // ── Render functions ──
+  // ── PDF Render functions ──
   const renderPage = (pageNum: number) => {
     const active = isCurrentPage(pageNum);
 
@@ -520,25 +703,23 @@ export default function ReaderPage() {
           ${theme === 'sepia' ? 'shadow-amber-900/20' : 'shadow-black/40'}
           hover:shadow-2xl
           ${active ? 'ring-2 ring-purple-500/40 shadow-lg shadow-purple-500/10' : ''}`}
-          style={isMobile ? {
-            overflow: 'visible',
-            width: viewMode === 'spread' ? `${pageWidth}px` : 'fit-content',
-            maxWidth: 'calc(100vw - 32px)',
-            marginBottom: viewMode === 'single' ? '0' : `${PAGE_GAP}px`,
-            marginTop: viewMode === 'single' ? '0' : '0',
-          } : {
-            overflow: 'hidden',
-            width: viewMode === 'spread' ? `${pageWidth}px` : 'fit-content',
-            maxWidth: `calc(100vw - ${effectiveSidebarVisible ? 384 + 96 + 60 : 96 + 60}px)`,
-            marginBottom: viewMode === 'single' ? '0' : `${PAGE_GAP}px`,
-            marginTop: viewMode === 'single' ? '0' : '0',
-          }}
+        style={
+          isMobile
+            ? {
+                overflow: 'visible',
+                width: viewMode === 'spread' ? `${pageWidth}px` : 'fit-content',
+                maxWidth: 'calc(100vw - 32px)',
+                marginBottom: viewMode === 'single' ? '0' : `${PAGE_GAP}px`,
+              }
+            : {
+                overflow: 'hidden',
+                width: viewMode === 'spread' ? `${pageWidth}px` : 'fit-content',
+                maxWidth: `calc(100vw - ${effectiveSidebarVisible ? 384 + 96 + 60 : 96 + 60}px)`,
+                marginBottom: viewMode === 'single' ? '0' : `${PAGE_GAP}px`,
+              }
+        }
       >
-        <PageRenderer
-          pdf={pdfDocument}
-          pageIndex={pageNum - 1}
-          width={pageWidth}
-        />
+        <PageRenderer pdf={pdfDocument} pageIndex={pageNum - 1} width={pageWidth} />
       </div>
     );
   };
@@ -558,9 +739,7 @@ export default function ReaderPage() {
     return (
       <div className="flex flex-col items-center justify-center min-h-full py-4">
         {pages.map((p) => (
-          <div key={`single_${p}`}>
-            {renderPage(p)}
-          </div>
+          <div key={`single_${p}`}>{renderPage(p)}</div>
         ))}
       </div>
     );
@@ -578,10 +757,7 @@ export default function ReaderPage() {
     const visiblePairs = pairs.slice(start, end);
 
     return (
-      <div
-        ref={spreadContainerRef}
-        className="flex flex-col items-center justify-center min-h-full py-4"
-      >
+      <div ref={spreadContainerRef} className="flex flex-col items-center justify-center min-h-full py-4">
         {visiblePairs.map(([left, right], idx) => (
           <div
             key={`spread_${start + idx}`}
@@ -599,7 +775,7 @@ export default function ReaderPage() {
 
   // =========== RENDER ===========
 
-  if (pdfLoading && !pdfDocument) {
+  if (!isEpubMode && pdfLoading && !pdfDocument) {
     return (
       <div className={`min-h-screen flex items-center justify-center ${theme === 'sepia' ? 'theme-sepia' : 'theme-night'}`}>
         <LoadingSpinner message="Loading PDF..." />
@@ -607,7 +783,7 @@ export default function ReaderPage() {
     );
   }
 
-  if (pdfError) {
+  if (!isEpubMode && pdfError) {
     return (
       <div className={`min-h-screen flex items-center justify-center ${theme === 'sepia' ? 'theme-sepia' : 'theme-night'}`}>
         <div className="text-center max-w-md">
@@ -623,20 +799,36 @@ export default function ReaderPage() {
     );
   }
 
-  const sidebarOffset = showSidebar ? 384 : 0;
+  const hasActiveTranslation = Boolean(activeSelectedText || translationResult || wordResult || translating);
 
   return (
     <div className={`h-screen flex flex-col ${theme === 'sepia' ? 'theme-sepia' : 'theme-night'}`}>
       <ReaderHeader
-        title="PDF Reader"
-        currentPage={currentPage}
-        numPages={numPages}
+        title={pdfBook?.title || 'E-Reader'}
+        chapterTitle={epubChapterTitle}
+        currentPage={isEpubMode ? epubPageInfo.current : currentPage}
+        numPages={isEpubMode ? epubPageInfo.total : numPages}
         theme={theme}
         showSidebar={effectiveSidebarVisible}
         zoomLevel={zoomLevel}
         viewMode={viewMode}
         progressPercent={progressPercent}
         isMobile={isMobile}
+        isEpubMode={isEpubMode}
+        epubLayout={epubLayout}
+        fontSize={readerFontSize}
+        fontFamily={fontFamily}
+        lineHeight={lineHeight}
+        maxWidth={maxWidth}
+        toc={epubToc}
+        onToggleEpubMode={() => setIsEpubMode((v) => !v)}
+        onEpubLayoutChange={handleEpubLayoutChange}
+        onThemeChange={handleThemeChange}
+        onFontSizeChange={handleFontSizeChange}
+        onFontFamilyChange={handleFontFamilyChange}
+        onLineHeightChange={handleLineHeightChange}
+        onMaxWidthChange={handleMaxWidthChange}
+        onSelectTocItem={(href) => epubViewerRef.current?.goToHref(href)}
         onToggleTheme={toggleTheme}
         onToggleSidebar={toggleSidebar}
         onBack={handleBack}
@@ -645,14 +837,12 @@ export default function ReaderPage() {
         onZoomChange={setZoomLevel}
         onViewModeChange={setViewMode}
         onToggleSearch={toggleSearch}
-        
-        
         onOpenSettings={() => setIsSettingsOpen(true)}
       />
 
       <div className="flex-1 flex overflow-hidden relative">
-        {/* Thumbnail sidebar — hidden on mobile */}
-        {!isMobile && (
+        {/* Thumbnail sidebar — only in PDF mode on desktop */}
+        {!isMobile && !isEpubMode && (
           <ThumbnailSidebar
             pdf={pdfDocument}
             totalPages={numPages || 0}
@@ -662,105 +852,151 @@ export default function ReaderPage() {
           />
         )}
 
-        {/* Page Viewer (react-pdf) */}
+        {/* Main Reader Area */}
         <div
           ref={(node) => {
             scrollContainerRef.current = node;
             progressContainerRef.current = node;
             containerWidthRef.current = node;
           }}
-          className="flex-1 overflow-y-auto overflow-x-hidden relative"
-          
+          className={`flex-1 relative ${isEpubMode ? 'overflow-hidden flex flex-col' : 'overflow-y-auto overflow-x-hidden'}`}
           onScroll={handleScroll}
         >
-          {/* View mode backdrop for single/spread */}
-          {(viewMode === 'single' || viewMode === 'spread') && (
-            <div className="fixed inset-0 bg-black/40 pointer-events-none z-0" />
+          {isEpubMode ? (
+            /* ── EPUB READER (Primary Mode) ── */
+            <div className="w-full h-full flex-1 relative">
+              {epubLoading && !epubBlob ? (
+                <div className="w-full h-full flex items-center justify-center bg-[#141518]">
+                  <LoadingSpinner message="წიგნი მზადდება EPUB ფორმატში..." light />
+                </div>
+              ) : (
+                <EpubViewer
+                  ref={epubViewerRef}
+                  bookId={bookId}
+                  bookBlob={epubBlob}
+                  fontSize={readerFontSize}
+                  theme={theme}
+                  fontFamily={fontFamily}
+                  lineHeight={lineHeight}
+                  layoutMode={epubLayout}
+                  maxWidth={maxWidth}
+                  onTextPick={handleEpubTextPick}
+                  onRelocate={handleEpubRelocate}
+                  onTocLoaded={setEpubToc}
+                />
+              )}
+
+              {/* Left / Right Subtle Page Turn Buttons for Paginated EPUB Mode */}
+              {epubLayout !== 'scrolled' && !isMobile && (
+                <>
+                  <button
+                    onClick={handlePrevPage}
+                    className="fixed left-4 top-1/2 -translate-y-1/2 z-20 p-2.5 rounded-full bg-black/25 hover:bg-purple-600/80 text-white/50 hover:text-white border border-white/10 backdrop-blur-md transition-all hover:scale-110 shadow-lg"
+                    title="წინა გვერდი (←)"
+                  >
+                    <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+                    </svg>
+                  </button>
+                  <button
+                    onClick={handleNextPage}
+                    className="fixed right-4 top-1/2 -translate-y-1/2 z-20 p-2.5 rounded-full bg-black/25 hover:bg-purple-600/80 text-white/50 hover:text-white border border-white/10 backdrop-blur-md transition-all hover:scale-110 shadow-lg"
+                    title="შემდეგი გვერდი (→)"
+                  >
+                    <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                    </svg>
+                  </button>
+                </>
+              )}
+            </div>
+          ) : (
+            /* ── ORIGINAL PDF VIEWER (Fallback Mode) ── */
+            <>
+              {(viewMode === 'single' || viewMode === 'spread') && (
+                <div className="fixed inset-0 bg-black/40 pointer-events-none z-0" />
+              )}
+
+              <SearchPanel
+                query={query}
+                searchState={searchState}
+                showSearch={showSearch}
+                onQueryChange={setQuery}
+                onSearch={runSearch}
+                onGoToMatch={goToMatch}
+                onClose={handleCloseSearch}
+                onNavToPage={handleNavToPage}
+              />
+
+              <div className={`relative z-10 ${theme === 'sepia' ? 'theme-sepia' : 'theme-night'}`}>
+                {numPages && numPages > 0 ? (
+                  <>
+                    {viewMode === 'scroll' && renderScrollView()}
+                    {viewMode === 'single' && renderSingleView()}
+                    {viewMode === 'spread' && renderSpreadView()}
+                  </>
+                ) : (
+                  <div className="flex items-center justify-center h-full min-h-[60vh]">
+                    <div className="text-center">
+                      <p className="opacity-50 mb-4">No pages loaded</p>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              <MobileLoupe
+                containerRef={scrollContainerRef}
+                onWordSelected={handleLoupeWordSelected}
+                getWordAtPoint={(vpX, vpY) => {
+                  const elements = document.elementsFromPoint(vpX, vpY);
+                  const pageEl = elements.find((el) => el.closest('[data-page-number]'))?.closest('[data-page-number]') as
+                    | HTMLElement
+                    | undefined;
+                  if (!pageEl) return null;
+                  const pageIdx = Number(pageEl.dataset.pageNumber) - 1;
+                  const pageData = wordPositionsCache[pageIdx];
+                  if (!pageData || !pageData.words) return null;
+                  const pageRect = pageEl.getBoundingClientRect();
+                  const scaleX = pageData.page_width / (pageRect.width || 1);
+                  const scaleY = pageData.page_height / (pageRect.height || 1);
+                  const pdfX = (vpX - pageRect.left) * scaleX;
+                  const pdfY = (vpY - pageRect.top) * scaleY;
+                  for (const w of pageData.words) {
+                    if (pdfX >= w.x0 && pdfX <= w.x1 && pdfY >= w.y0 && pdfY <= w.y1) return w.word;
+                  }
+                  return null;
+                }}
+                pageZoom={zoomLevel}
+                enabled={isMobile}
+              />
+            </>
           )}
 
-          {/* Search Panel */}
-          <SearchPanel
-            query={query}
-            searchState={searchState}
-            showSearch={showSearch}
-            onQueryChange={setQuery}
-            onSearch={runSearch}
-            onGoToMatch={goToMatch}
-            onClose={handleCloseSearch}
-            onNavToPage={handleNavToPage}
-          />
-
-          {/* PDF Pages Viewer (Book Flip Spread / Continuous Scroll / Single Page) */}
-          <div className={`relative z-10 ${theme === 'sepia' ? 'theme-sepia' : 'theme-night'}`}>
-            {numPages && numPages > 0 ? (
-              <>
-                {viewMode === 'scroll' && renderScrollView()}
-                {viewMode === 'single' && renderSingleView()}
-                {viewMode === 'spread' && renderSpreadView()}
-              </>
-            ) : (
-              <div className="flex items-center justify-center h-full min-h-[60vh]">
-                <div className="text-center">
-                  <p className="opacity-50 mb-4">No pages loaded</p>
-                </div>
-              </div>
-            )}
-          </div>
-
-          {/* Mobile Loupe — only active on mobile */}
-          <MobileLoupe
-            containerRef={scrollContainerRef}
-            onWordSelected={handleLoupeWordSelected}
-            getWordAtPoint={(vpX, vpY) => {
-              // Inline: find the word at a viewport point using wordPositionsCache
-              const elements = document.elementsFromPoint(vpX, vpY);
-              const pageEl = elements.find(el => el.closest('[data-page-number]'))?.closest('[data-page-number]') as HTMLElement | undefined;
-              if (!pageEl) return null;
-              const pageIdx = Number(pageEl.dataset.pageNumber) - 1;
-              const pageData = wordPositionsCache[pageIdx];
-              if (!pageData || !pageData.words) return null;
-              const pageRect = pageEl.getBoundingClientRect();
-              const scaleX = pageData.page_width / (pageRect.width || 1);
-              const scaleY = pageData.page_height / (pageRect.height || 1);
-              const pdfX = (vpX - pageRect.left) * scaleX;
-              const pdfY = (vpY - pageRect.top) * scaleY;
-              for (const w of pageData.words) {
-                if (pdfX >= w.x0 && pdfX <= w.x1 && pdfY >= w.y0 && pdfY <= w.y1) return w.word;
-              }
-              return null;
-            }}
-            pageZoom={zoomLevel}
-            enabled={isMobile}
-          />
-
-          {/* Floating page navigation (bottom-right) */}
+          {/* Floating page/progress navigation (bottom-right) */}
           <div
-            className="fixed bottom-6 z-40 flex items-center gap-2 select-none"
-            style={{
-              right: isMobile
-                ? '1rem'
-                : showSidebar ? `calc(1.5rem + ${sidebarOffset}px)` : '1.5rem'
-            }}
+            className="fixed bottom-5 right-6 z-30 flex items-center gap-2 select-none"
           >
-            <div className="glass rounded-xl px-3 py-2 flex items-center gap-2 text-xs">
-              <span className="text-white/70 tabular-nums">
-                {currentPage} / {numPages || '?'}
+            <div className="glass rounded-xl px-3 py-1.5 flex items-center gap-2 text-xs shadow-xl border border-white/10">
+              <span className="text-white/80 tabular-nums font-medium">
+                {isEpubMode
+                  ? `${Math.round(progressPercent)}%`
+                  : `${currentPage} / ${numPages || '?'}`}
               </span>
               <button
-                onClick={() => scrollToPage(currentPage - 1)}
-                disabled={!numPages || currentPage <= 1}
-                className="p-1 rounded-lg hover:bg-white/10 disabled:opacity-30 transition-colors"
-                title="Previous page (←)"
+                onClick={handlePrevPage}
+                disabled={!isEpubMode && (!numPages || currentPage <= 1)}
+                className="p-1 rounded-lg hover:bg-white/15 disabled:opacity-30 transition-colors"
+                title="წინა გვერდი (←)"
               >
                 <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
                 </svg>
               </button>
               <button
-                onClick={() => scrollToPage(currentPage + 1)}
-                disabled={!numPages || currentPage >= numPages}
-                className="p-1 rounded-lg hover:bg-white/10 disabled:opacity-30 transition-colors"
-                title="Next page (→)"
+                onClick={handleNextPage}
+                disabled={!isEpubMode && (!numPages || currentPage >= numPages)}
+                className="p-1 rounded-lg hover:bg-white/15 disabled:opacity-30 transition-colors"
+                title="შემდეგი გვერდი (→)"
               >
                 <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
@@ -771,7 +1007,7 @@ export default function ReaderPage() {
         </div>
 
         {/* Word Highlight Overlay on top of PDF */}
-        {isWordClick && selectionRect && selectedText && (
+        {!isEpubMode && isWordClick && selectionRect && pdfSelectedText && (
           <div
             className="fixed z-30 pointer-events-none rounded transition-all duration-150"
             style={{
@@ -785,31 +1021,35 @@ export default function ReaderPage() {
           />
         )}
 
-        {/* Floating Translate Icon */}
-        {translateIconPos && selectedText && !translationResult && !wordResult && !translating && (
+        {/* Floating Translate Button right at the selected word/phrase (both EPUB & PDF) */}
+        {translateIconPos && activeSelectedText && !translationResult && !wordResult && !translating && (
           <button
             onClick={handleTranslate}
-            className="fixed z-50 p-2 rounded-full bg-purple-600 hover:bg-purple-500 shadow-lg
-              transition-all duration-200 hover:scale-110 animate-bounce"
+            className="fixed z-50 px-3 py-1.5 rounded-full bg-purple-600 hover:bg-purple-500 text-white text-xs font-semibold shadow-xl shadow-purple-900/40 border border-purple-400/30 flex items-center gap-1.5 transition-all duration-150 hover:scale-105 cursor-pointer"
             style={{
               top: `${translateIconPos.top}px`,
               left: `${translateIconPos.left}px`,
               transform: 'translate(-50%, -50%)',
             }}
-            title="Translate"
+            title="თარგმნა"
           >
-            <svg className="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-                d="M3 5h12M3 12h18M3 19h6" />
+            <svg className="w-3.5 h-3.5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M3 5h12M9 3v2m1.048 9.5A18.022 18.022 0 016.412 9m6.088 9h7M11 21l5-10 5 10M12.751 5C11.783 10.77 8.07 15.61 3 18.129"
+              />
             </svg>
+            <span>თარგმნა</span>
           </button>
         )}
 
         {/* Desktop Floating Translation Widget (Right Side) */}
-        {!isMobile && showSidebar && (selectedText || translationResult || wordResult || translating) && (
+        {!isMobile && showSidebar && hasActiveTranslation && (
           <div className="fixed right-6 top-20 z-40 max-h-[80vh] overflow-y-auto">
             <TranslationPanel
-              selectedText={selectedText}
+              selectedText={activeSelectedText}
               translationResult={translationResult}
               wordResult={wordResult}
               translationError={translationError}
@@ -828,13 +1068,11 @@ export default function ReaderPage() {
         {/* Mobile Translation Bottom Sheet */}
         {isMobile && showMobileTranslation && (
           <div className="fixed inset-x-0 bottom-0 z-50">
-            {/* Backdrop */}
             <div
               className="fixed inset-0 bg-black/60 backdrop-blur-sm mobile-bottom-sheet-backdrop"
               onClick={handleCloseTranslation}
             />
 
-            {/* Sheet */}
             <div className="relative bg-gray-900 rounded-t-2xl border-t border-white/10 shadow-2xl max-h-[70vh] overflow-y-auto mobile-bottom-sheet">
               <div className="sticky top-0 bg-gray-900 pt-3 pb-2 px-4 flex items-center justify-between border-b border-white/10">
                 <span className="text-sm font-semibold opacity-70 uppercase tracking-wider">Translation</span>
@@ -849,7 +1087,7 @@ export default function ReaderPage() {
               </div>
               <div className="p-4">
                 <TranslationPanel
-                  selectedText={selectedText}
+                  selectedText={activeSelectedText}
                   translationResult={translationResult}
                   wordResult={wordResult}
                   translationError={translationError}

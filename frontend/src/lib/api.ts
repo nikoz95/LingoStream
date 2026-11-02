@@ -365,7 +365,7 @@ export interface VocabularyWord {
   sentence_context: string | null;
   sentence_context_translated: string | null;
   translation: string | null;
-  book_id: number | null;
+  book_id: number | null; is_mastered?: boolean;
   created_at: string | null;
 }
 
@@ -381,7 +381,7 @@ export interface CreateVocabularyWordRequest {
   definition?: string | null;
   sentence_context?: string | null;
   sentence_context_translated?: string | null;
-  translation?: string | null;
+  translation?: string | null; is_mastered?: boolean;
 }
 
 export async function listVocabularyWords(bookId?: number): Promise<VocabularyListResponse> {

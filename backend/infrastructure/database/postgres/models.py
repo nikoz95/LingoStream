@@ -120,4 +120,5 @@ class VocabularyWord(Base):
     sentence_context = Column(Text, nullable=True)
     sentence_context_translated = Column(Text, nullable=True)
     translation = Column(Text, nullable=True)
+    is_mastered = Column(Boolean, default=False, nullable=False)
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
