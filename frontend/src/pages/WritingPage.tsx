@@ -127,6 +127,9 @@ export default function WritingPage() {
   const [chatLoading, setChatLoading] = useState(false);
   const [chatError, setChatError] = useState('');
 
+  // ── Mobile Scenario Drawer toggle for Chat mode ──
+  const [showMobileScenarios, setShowMobileScenarios] = useState(false);
+
   // ── Speech-to-Text (Microphone) State ──
   const [isListening, setIsListening] = useState(false);
   const recognitionRef = useRef<any>(null);
@@ -616,12 +619,12 @@ export default function WritingPage() {
               }
             }}
             placeholder="ჩაეკითხე შენი სიტყვებით (მაგ: აქ Present Perfect რატომ არ წავა?)..."
-            className="flex-1 bg-black/40 border border-white/15 rounded-xl px-3 py-2 text-xs text-white placeholder-white/40 focus:outline-none focus:border-indigo-400"
+            className="flex-1 bg-black/40 border border-white/15 rounded-xl px-3 py-2 text-base sm:text-xs text-white placeholder-white/40 focus:outline-none focus:border-indigo-400"
           />
           <button
             onClick={() => askDeepDive(threadId, originalText, correctedText, contextSentence)}
             disabled={thread?.loading || !(thread?.customQuestion || '').trim()}
-            className="px-3.5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 text-xs font-semibold text-white transition-colors cursor-pointer"
+            className="px-3.5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 text-xs font-semibold text-white transition-colors cursor-pointer shrink-0"
           >
             კითხვა
           </button>
@@ -631,66 +634,67 @@ export default function WritingPage() {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-gray-950 via-purple-950/60 to-gray-950 text-white">
+    <div className="min-h-screen bg-gradient-to-br from-gray-950 via-purple-950/60 to-gray-950 text-white pb-20 sm:pb-8">
       {/* Header */}
-      <header className="glass sticky top-0 z-40 px-4 lg:px-8 h-16 border-b border-white/10 flex items-center justify-between">
-        <div className="flex items-center gap-3">
+      <header className="glass sticky top-0 z-40 px-3 sm:px-6 lg:px-8 py-2.5 min-h-14 border-b border-white/10 flex items-center justify-between gap-2">
+        <div className="flex items-center gap-2 sm:gap-3 min-w-0">
           <button
             onClick={() => navigate('/library')}
-            className="p-2 rounded-xl hover:bg-white/10 transition-colors cursor-pointer"
+            className="p-2 rounded-xl hover:bg-white/10 transition-colors cursor-pointer shrink-0"
             title="ბიბლიოთეკაში დაბრუნება"
           >
             <svg className="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
             </svg>
           </button>
-          <div>
-            <h1 className="text-lg lg:text-xl font-bold bg-gradient-to-r from-purple-400 via-pink-400 to-indigo-400 bg-clip-text text-transparent">
-              ✍️ Writing & Speaking Studio
+          <div className="min-w-0">
+            <h1 className="text-sm sm:text-lg lg:text-xl font-bold bg-gradient-to-r from-purple-400 via-pink-400 to-indigo-400 bg-clip-text text-transparent truncate">
+              ✍️ Writing Studio
             </h1>
-            <p className="text-[11px] text-white/50 hidden sm:block">
+            <p className="text-[11px] text-white/50 hidden md:block truncate">
               თავისუფალი წერა, ცოცხალი დიალოგი, გრამატიკაში ჩაძიება და Vocabulary-ს შევსება
             </p>
           </div>
         </div>
 
-        <div className="flex items-center gap-2.5">
+        <div className="flex items-center gap-1.5 sm:gap-2.5 shrink-0">
           <button
             onClick={() => navigate('/library')}
-            className="px-3.5 py-2 text-xs sm:text-sm rounded-xl border border-white/15 hover:bg-white/10 transition-all cursor-pointer"
+            className="px-2.5 sm:px-3.5 py-1.5 sm:py-2 text-xs sm:text-sm rounded-xl border border-white/15 hover:bg-white/10 transition-all cursor-pointer"
           >
-            📚 Library
+            📚 <span className="hidden sm:inline">Library</span>
           </button>
           <button
             onClick={() => navigate('/vocabulary')}
-            className="px-3.5 py-2 text-xs sm:text-sm rounded-xl border border-purple-400/30 bg-purple-500/10 hover:bg-purple-500/20 transition-all cursor-pointer flex items-center gap-1.5"
+            className="px-2.5 sm:px-3.5 py-1.5 sm:py-2 text-xs sm:text-sm rounded-xl border border-purple-400/30 bg-purple-500/10 hover:bg-purple-500/20 transition-all cursor-pointer flex items-center gap-1"
           >
             <span>🗂️</span>
-            <span>Vocabulary</span>
+            <span className="hidden xs:inline sm:inline">Vocab</span>
           </button>
           <button
             onClick={handleLogout}
-            className="px-3.5 py-2 text-xs sm:text-sm rounded-xl border border-white/15 hover:bg-white/10 transition-colors cursor-pointer"
+            className="px-2.5 sm:px-3.5 py-1.5 sm:py-2 text-xs sm:text-sm rounded-xl border border-white/15 hover:bg-white/10 transition-colors cursor-pointer"
           >
-            Sign Out
+            <span className="hidden sm:inline">Sign Out</span>
+            <span className="sm:hidden">🚪</span>
           </button>
         </div>
       </header>
 
-      <main className="max-w-6xl mx-auto px-4 lg:px-8 py-6 space-y-6">
+      <main className="max-w-6xl mx-auto px-3 sm:px-6 lg:px-8 py-4 sm:py-6 space-y-4 sm:space-y-6">
         {/* Mode Switcher Tabs */}
-        <div className="flex flex-wrap items-center justify-between gap-4">
-          <div className="inline-flex p-1 rounded-2xl bg-white/5 border border-white/10">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div className="grid grid-cols-2 sm:inline-flex p-1 rounded-2xl bg-white/5 border border-white/10 w-full sm:w-auto">
             <button
               onClick={() => setMode('free')}
-              className={`px-5 py-2.5 rounded-xl text-sm font-semibold transition-all cursor-pointer flex items-center gap-2 ${
+              className={`px-3 sm:px-5 py-2.5 rounded-xl text-xs sm:text-sm font-semibold transition-all cursor-pointer flex items-center justify-center gap-1.5 sm:gap-2 ${
                 mode === 'free'
                   ? 'bg-gradient-to-r from-purple-600 to-indigo-600 text-white shadow-lg shadow-purple-600/30'
                   : 'text-white/60 hover:text-white'
               }`}
             >
               <span>📝</span>
-              <span>Free Writing Studio</span>
+              <span>Free Writing</span>
             </button>
             <button
               onClick={() => {
@@ -699,73 +703,83 @@ export default function WritingPage() {
                   startNewChat();
                 }
               }}
-              className={`px-5 py-2.5 rounded-xl text-sm font-semibold transition-all cursor-pointer flex items-center gap-2 ${
+              className={`px-3 sm:px-5 py-2.5 rounded-xl text-xs sm:text-sm font-semibold transition-all cursor-pointer flex items-center justify-center gap-1.5 sm:gap-2 ${
                 mode === 'chat'
                   ? 'bg-gradient-to-r from-purple-600 to-indigo-600 text-white shadow-lg shadow-purple-600/30'
                   : 'text-white/60 hover:text-white'
               }`}
             >
               <span>💬</span>
-              <span>AI Roleplay & Live Chat</span>
+              <span>AI Roleplay Chat</span>
             </button>
           </div>
 
-          <div className="text-xs text-white/50 bg-white/[0.03] border border-white/10 px-3.5 py-2 rounded-xl">
+          <div className="text-[11px] sm:text-xs text-white/50 bg-white/[0.03] border border-white/10 px-3 py-2 rounded-xl leading-relaxed">
             💡 <span className="text-purple-300 font-medium">რჩევა:</span> თუ წერისას სიტყვა არ გახსენდება, პირდაპირ{' '}
-            <span className="text-emerald-300 font-medium">ქართულად ჩაწერე</span> წინადადებაში — AI თარგმნის და აგიხსნის!
+            <span className="text-emerald-300 font-medium">ქართულად ჩაწერე</span> — AI თარგმნის და აგიხსნის!
           </div>
         </div>
 
-        {/* Word Lookup Floating Popover (when clicking any word in AI texts) */}
+        {/* Word Lookup Floating Bottom Sheet / Popover (mobile & desktop friendly) */}
         {(lookupLoading || lookupResult || lookupError) && (
-          <div className="rounded-2xl bg-indigo-950/90 border border-indigo-400/40 p-4 shadow-xl flex flex-wrap items-center justify-between gap-4">
+          <div className="fixed bottom-3 left-3 right-3 sm:left-auto sm:right-6 sm:bottom-6 sm:w-[440px] z-50 rounded-2xl bg-gray-950/95 backdrop-blur-xl border border-indigo-400/50 p-4 shadow-2xl">
             {lookupLoading && <LoadingSpinner message="სიტყვა ითარგმნება..." />}
-            {lookupError && <p className="text-xs text-red-400">{lookupError}</p>}
+            {lookupError && (
+              <div className="flex items-center justify-between gap-2">
+                <p className="text-xs text-red-400">{lookupError}</p>
+                <button
+                  onClick={() => setLookupError('')}
+                  className="text-xs text-white/50 hover:text-white px-2 py-1"
+                >
+                  ✕
+                </button>
+              </div>
+            )}
             {lookupResult && (
-              <div className="flex-1 flex flex-wrap items-center justify-between gap-4">
-                <div className="space-y-1">
-                  <div className="flex items-center gap-2.5">
-                    <span className="text-base font-bold text-white">{lookupResult.word}</span>
-                    {lookupResult.phonetic && (
-                      <span className="text-xs text-indigo-300 font-mono">{lookupResult.phonetic}</span>
+              <div className="space-y-3">
+                <div className="flex items-start justify-between gap-2">
+                  <div className="space-y-1 min-w-0">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="text-base font-bold text-white">{lookupResult.word}</span>
+                      {lookupResult.phonetic && (
+                        <span className="text-xs text-indigo-300 font-mono">{lookupResult.phonetic}</span>
+                      )}
+                      <button
+                        onClick={() => speakText(lookupResult.word)}
+                        className="text-xs px-2 py-0.5 rounded bg-white/10 hover:bg-white/20 cursor-pointer"
+                      >
+                        🔊
+                      </button>
+                    </div>
+                    <p className="text-sm text-emerald-300 font-medium">{lookupResult.translation}</p>
+                    {lookupResult.definition && (
+                      <p className="text-xs text-white/70 leading-relaxed">{lookupResult.definition}</p>
                     )}
-                    <button
-                      onClick={() => speakText(lookupResult.word)}
-                      className="text-xs px-2 py-0.5 rounded bg-white/10 hover:bg-white/20 cursor-pointer"
-                    >
-                      🔊
-                    </button>
                   </div>
-                  <p className="text-sm text-emerald-300 font-medium">{lookupResult.translation}</p>
-                  {lookupResult.definition && (
-                    <p className="text-xs text-white/70">{lookupResult.definition}</p>
-                  )}
-                </div>
-
-                <div className="flex items-center gap-2">
-                  <button
-                    onClick={() => handleSaveToVocabulary(lookupResult)}
-                    disabled={!!savedWordsMap[lookupResult.word.toLowerCase().trim()]}
-                    className={`px-4 py-2 rounded-xl text-xs font-semibold transition-all cursor-pointer ${
-                      savedWordsMap[lookupResult.word.toLowerCase().trim()]
-                        ? 'bg-emerald-500/20 border border-emerald-500/40 text-emerald-300'
-                        : 'bg-purple-600 hover:bg-purple-500 text-white shadow-lg shadow-purple-600/30'
-                    }`}
-                  >
-                    {savedWordsMap[lookupResult.word.toLowerCase().trim()]
-                      ? '✓ შენახულია Vocabulary-ში'
-                      : '+ Save to Vocabulary'}
-                  </button>
                   <button
                     onClick={() => {
                       setLookupResult(null);
                       setLookupError('');
                     }}
-                    className="p-2 text-xs text-white/50 hover:text-white cursor-pointer"
+                    className="p-1.5 text-sm text-white/50 hover:text-white cursor-pointer shrink-0"
                   >
                     ✕
                   </button>
                 </div>
+
+                <button
+                  onClick={() => handleSaveToVocabulary(lookupResult)}
+                  disabled={!!savedWordsMap[lookupResult.word.toLowerCase().trim()]}
+                  className={`w-full py-2.5 rounded-xl text-xs font-semibold transition-all cursor-pointer ${
+                    savedWordsMap[lookupResult.word.toLowerCase().trim()]
+                      ? 'bg-emerald-500/20 border border-emerald-500/40 text-emerald-300'
+                      : 'bg-purple-600 hover:bg-purple-500 text-white shadow-lg shadow-purple-600/30'
+                  }`}
+                >
+                  {savedWordsMap[lookupResult.word.toLowerCase().trim()]
+                    ? '✓ შენახულია Vocabulary-ში'
+                    : '+ Save to Vocabulary'}
+                </button>
               </div>
             )}
           </div>
@@ -796,7 +810,7 @@ export default function WritingPage() {
                   value={topic}
                   onChange={(e) => setTopic(e.target.value)}
                   placeholder="თემა ან სიტუაცია (სურვილისამებრ)..."
-                  className="w-full bg-black/30 border border-white/10 rounded-xl px-3.5 py-2.5 text-xs text-white placeholder-white/35 focus:outline-none focus:border-purple-400"
+                  className="w-full bg-black/30 border border-white/10 rounded-xl px-3.5 py-2.5 text-base sm:text-xs text-white placeholder-white/35 focus:outline-none focus:border-purple-400"
                 />
               </div>
 
@@ -805,18 +819,18 @@ export default function WritingPage() {
                 <textarea
                   value={text}
                   onChange={(e) => setText(e.target.value)}
-                  rows={10}
+                  rows={8}
                   placeholder={`დაწერე ნებისმიერ თემაზე ინგლისურად...\n\nთუ რაიმე სიტყვა ან ფრაზა არ გახსენდება, პირდაპირ ქართულად ჩაწერე:\nმაგ: "Yesterday I wanted to call him, მაგრამ გადავიფიქრე because it was too late."`}
-                  className="w-full bg-black/40 border border-white/15 rounded-2xl p-4 text-sm text-white placeholder-white/30 leading-relaxed focus:outline-none focus:border-purple-400 resize-y"
+                  className="w-full bg-black/40 border border-white/15 rounded-2xl p-3.5 sm:p-4 text-base sm:text-sm text-white placeholder-white/30 leading-relaxed focus:outline-none focus:border-purple-400 resize-y"
                 />
               </div>
 
               {/* Action Bar: Voice Dictation + Evaluate */}
-              <div className="flex flex-wrap items-center justify-between gap-3">
+              <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2.5 sm:gap-3">
                 <button
                   type="button"
                   onClick={() => toggleVoiceInput('free')}
-                  className={`px-3.5 py-2.5 rounded-xl text-xs font-semibold border transition-all cursor-pointer flex items-center gap-2 ${
+                  className={`px-3.5 py-2.5 rounded-xl text-xs font-semibold border transition-all cursor-pointer flex items-center justify-center gap-2 ${
                     isListening
                       ? 'bg-red-500/20 border-red-400 text-red-300 animate-pulse'
                       : 'bg-white/5 hover:bg-white/10 border-white/15 text-white/80'
@@ -829,7 +843,7 @@ export default function WritingPage() {
                 <button
                   onClick={handleEvaluateWriting}
                   disabled={evaluating || !text.trim()}
-                  className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 disabled:opacity-40 text-sm font-semibold text-white shadow-lg shadow-purple-600/30 transition-all cursor-pointer flex items-center gap-2"
+                  className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 disabled:opacity-40 text-sm font-semibold text-white shadow-lg shadow-purple-600/30 transition-all cursor-pointer flex items-center justify-center gap-2"
                 >
                   <span>✨</span>
                   <span>{evaluating ? 'AI ამოწმებს...' : 'შემოწმება და გარჩევა'}</span>
@@ -1190,63 +1204,84 @@ export default function WritingPage() {
         {/* MODE 2: AI ROLEPLAY & LIVE CONVERSATION                               */}
         {/* ===================================================================== */}
         {mode === 'chat' && (
-          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
-            {/* Left Sidebar: Scenario Selector */}
-            <div className="lg:col-span-4 space-y-4 rounded-2xl bg-white/[0.03] border border-white/10 p-5">
-              <h2 className="text-base font-semibold text-white">🎭 აირჩიე სცენარი</h2>
-              <div className="space-y-2">
-                {ROLEPLAY_SCENARIOS.map((sc) => {
-                  const active = selectedScenarioId === sc.id && !customScenario.trim();
-                  return (
-                    <button
-                      key={sc.id}
-                      onClick={() => {
-                        setSelectedScenarioId(sc.id);
-                        setCustomScenario('');
-                        startNewChat(sc.prompt);
-                      }}
-                      className={`w-full text-left p-3.5 rounded-xl border transition-all cursor-pointer ${
-                        active
-                          ? 'bg-purple-600/25 border-purple-400 text-white shadow-lg shadow-purple-600/15'
-                          : 'bg-black/30 border-white/10 text-white/75 hover:bg-white/5'
-                      }`}
-                    >
-                      <div className="flex items-center gap-2 font-semibold text-sm">
-                        <span>{sc.icon}</span>
-                        <span>{sc.title}</span>
-                      </div>
-                      <p className="text-xs text-white/50 mt-1">{sc.desc}</p>
-                    </button>
-                  );
-                })}
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 sm:gap-6 items-start">
+            {/* Left Sidebar: Scenario Selector (collapsible on mobile, always open on desktop) */}
+            <div className="lg:col-span-4 space-y-3 sm:space-y-4 rounded-2xl bg-white/[0.03] border border-white/10 p-4 sm:p-5">
+              <div className="flex items-center justify-between">
+                <h2 className="text-sm sm:text-base font-semibold text-white flex items-center gap-2">
+                  <span>🎭</span>
+                  <span>
+                    {ROLEPLAY_SCENARIOS.find((s) => s.id === selectedScenarioId)?.title ||
+                      'აირჩიე სცენარი'}
+                  </span>
+                </h2>
+                <button
+                  onClick={() => setShowMobileScenarios((prev) => !prev)}
+                  className="lg:hidden px-3 py-1.5 rounded-xl bg-white/10 text-xs font-semibold text-purple-200 cursor-pointer"
+                >
+                  {showMobileScenarios ? 'ჩაკეცვა ▲' : 'შეცვლა ▼'}
+                </button>
               </div>
 
-              {/* Custom Scenario */}
-              <div className="pt-2 border-t border-white/10 space-y-2">
-                <label className="text-xs font-semibold text-white/70 block">
-                  ✨ ან შექმენი შენი სცენარი:
-                </label>
-                <input
-                  type="text"
-                  value={customScenario}
-                  onChange={(e) => setCustomScenario(e.target.value)}
-                  placeholder="მაგ: განვიხილოთ კოსმოსში მოგზაურობა..."
-                  className="w-full bg-black/40 border border-white/15 rounded-xl px-3 py-2 text-xs text-white placeholder-white/35 focus:outline-none focus:border-purple-400"
-                />
-                <button
-                  onClick={() => startNewChat()}
-                  disabled={chatLoading}
-                  className="w-full py-2 rounded-xl bg-white/10 hover:bg-white/15 text-xs font-semibold text-white transition-colors cursor-pointer"
-                >
-                  🔄 ახალი დიალოგის დაწყება
-                </button>
+              <div className={`${showMobileScenarios ? 'block' : 'hidden'} lg:block space-y-3`}>
+                <div className="space-y-2">
+                  {ROLEPLAY_SCENARIOS.map((sc) => {
+                    const active = selectedScenarioId === sc.id && !customScenario.trim();
+                    return (
+                      <button
+                        key={sc.id}
+                        onClick={() => {
+                          setSelectedScenarioId(sc.id);
+                          setCustomScenario('');
+                          setShowMobileScenarios(false);
+                          startNewChat(sc.prompt);
+                        }}
+                        className={`w-full text-left p-3 sm:p-3.5 rounded-xl border transition-all cursor-pointer ${
+                          active
+                            ? 'bg-purple-600/25 border-purple-400 text-white shadow-lg shadow-purple-600/15'
+                            : 'bg-black/30 border-white/10 text-white/75 hover:bg-white/5'
+                        }`}
+                      >
+                        <div className="flex items-center gap-2 font-semibold text-xs sm:text-sm">
+                          <span>{sc.icon}</span>
+                          <span>{sc.title}</span>
+                        </div>
+                        <p className="text-[11px] sm:text-xs text-white/50 mt-1">{sc.desc}</p>
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {/* Custom Scenario */}
+                <div className="pt-2 border-t border-white/10 space-y-2">
+                  <label className="text-xs font-semibold text-white/70 block">
+                    ✨ ან შექმენი შენი სცენარი:
+                  </label>
+                  <input
+                    type="text"
+                    value={customScenario}
+                    onChange={(e) => setCustomScenario(e.target.value)}
+                    placeholder="მაგ: განვიხილოთ კოსმოსში მოგზაურობა..."
+                    className="w-full bg-black/40 border border-white/15 rounded-xl px-3 py-2 text-base sm:text-xs text-white placeholder-white/35 focus:outline-none focus:border-purple-400"
+                  />
+                  <button
+                    onClick={() => {
+                      setShowMobileScenarios(false);
+                      startNewChat();
+                    }}
+                    disabled={chatLoading}
+                    className="w-full py-2 rounded-xl bg-white/10 hover:bg-white/15 text-xs font-semibold text-white transition-colors cursor-pointer"
+                  >
+                    🔄 ახალი დიალოგის დაწყება
+                  </button>
+                </div>
               </div>
             </div>
 
             {/* Right Column: Live Chat Window */}
-            <div className="lg:col-span-8 rounded-2xl bg-white/[0.03] border border-white/10 p-5 flex flex-col space-y-4">
+            <div className="lg:col-span-8 rounded-2xl bg-white/[0.03] border border-white/10 p-3.5 sm:p-5 flex flex-col space-y-4">
               {/* Conversation Stream */}
-              <div className="space-y-4 max-h-[600px] overflow-y-auto pr-1">
+              <div className="space-y-4 max-h-[60vh] sm:max-h-[600px] overflow-y-auto pr-1">
                 {chatTurns.map((turn) => (
                   <div key={turn.id} className="space-y-2">
                     <div
@@ -1255,7 +1290,7 @@ export default function WritingPage() {
                       }`}
                     >
                       <div
-                        className={`max-w-[85%] rounded-2xl p-4 space-y-2 ${
+                        className={`max-w-[92%] sm:max-w-[85%] rounded-2xl p-3.5 sm:p-4 space-y-2 ${
                           turn.role === 'user'
                             ? 'bg-gradient-to-r from-purple-600/40 to-indigo-600/40 border border-purple-400/30 text-white'
                             : 'bg-black/40 border border-white/10 text-white/95'
@@ -1431,12 +1466,12 @@ export default function WritingPage() {
                     }
                   }}
                   placeholder="მიწერე პასუხი ინგლისურად (ან ჩაურთე ქართული სიტყვა, თუ გაიჭედე)..."
-                  className="flex-1 bg-black/40 border border-white/15 rounded-xl px-4 py-3 text-sm text-white placeholder-white/35 focus:outline-none focus:border-purple-400"
+                  className="flex-1 min-w-0 bg-black/40 border border-white/15 rounded-xl px-3.5 sm:px-4 py-3 text-base sm:text-sm text-white placeholder-white/35 focus:outline-none focus:border-purple-400"
                 />
                 <button
                   onClick={handleSendChatMessage}
                   disabled={chatLoading || !chatInput.trim()}
-                  className="px-5 py-3 rounded-xl bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 disabled:opacity-40 text-sm font-semibold text-white cursor-pointer"
+                  className="px-4 sm:px-5 py-3 rounded-xl bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 disabled:opacity-40 text-xs sm:text-sm font-semibold text-white cursor-pointer shrink-0"
                 >
                   გაგზავნა
                 </button>
