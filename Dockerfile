@@ -12,12 +12,11 @@ ENV DEBIAN_FRONTEND=noninteractive \
     S3_BUCKET_NAME=lingostream-books \
     S3_PUBLIC_URL=/api/v1/books
 
-# Install PostgreSQL 15, Redis, Nginx, curl, and build tools
+# Install PostgreSQL 15, Redis, curl, and build tools
 RUN apt-get update && apt-get install -y --no-install-recommends \
     postgresql-15 \
     postgresql-client-15 \
     redis-server \
-    nginx \
     curl \
     wget \
     gcc \
@@ -44,11 +43,8 @@ RUN pip install --no-cache-dir --upgrade pip && \
 # Copy Backend source code
 COPY backend/ .
 
-# Copy pre-built Frontend production assets directly into Nginx html directory
-COPY frontend/dist /var/www/html
-
-# Setup Nginx configuration
-COPY nginx.render.conf /etc/nginx/sites-available/default
+# Copy pre-built Frontend production assets
+COPY frontend/dist /app/frontend/dist
 
 # Configure PostgreSQL pg_hba.conf for internal local connections
 RUN sed -i 's/peer/trust/g' /etc/postgresql/15/main/pg_hba.conf && \

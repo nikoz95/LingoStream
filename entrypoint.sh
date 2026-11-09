@@ -32,16 +32,8 @@ mc alias set local http://127.0.0.1:9000 minioadmin minioadmin || true
 mc mb local/lingostream-books || true
 mc anonymous set download local/lingostream-books || true
 
-# 4. Start Backend (FastAPI)
-echo "Starting FastAPI Backend..."
+# 4. Start FastAPI Backend (serves API + Frontend SPA directly)
+APP_PORT="${PORT:-10000}"
+echo "Starting FastAPI Backend on 0.0.0.0:${APP_PORT}..."
 cd /app/backend
-uvicorn main:app --host 127.0.0.1 --port 8000 &
-
-# 5. Start Nginx (Frontend) in foreground (handles external HTTP traffic on port 80/PORT)
-echo "Starting Nginx on port ${PORT:-80}..."
-# Substitute PORT if Render provides $PORT
-if [ -n "$PORT" ] && [ "$PORT" != "80" ]; then
-    sed -i "s/listen 80;/listen $PORT;/g" /etc/nginx/sites-available/default
-fi
-
-nginx -g "daemon off;"
+exec uvicorn main:app --host 0.0.0.0 --port "${APP_PORT}"

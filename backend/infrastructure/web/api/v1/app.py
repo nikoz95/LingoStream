@@ -61,8 +61,43 @@ def create_app() -> FastAPI:
     app.include_router(vocabulary_router, prefix="/api/v1/vocabulary", tags=["vocabulary"])
     app.include_router(page_router, prefix="/api/v1/pages", tags=["pages"])
 
-    @app.get("/")
-    async def root():
-        return {"message": "LingoStream v6.0 — PDF.js + Word Click Zones Reader"}
+    # Health check for deployment platforms (Render, Koyeb, Docker)
+    @app.get("/healthz")
+    async def healthz():
+        return {"status": "ok"}
+
+    # ── Serve pre-built Frontend SPA (Nginx-less architecture) ──
+    import os
+    import mimetypes
+    from fastapi.staticfiles import StaticFiles
+    from starlette.responses import FileResponse
+
+    mimetypes.add_type("application/javascript", ".js")
+    mimetypes.add_type("application/javascript", ".mjs")
+
+    frontend_dir = os.environ.get("FRONTEND_DIST_DIR", "/app/frontend/dist")
+    if not os.path.exists(frontend_dir):
+        candidate = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../../../frontend/dist"))
+        if os.path.exists(candidate):
+            frontend_dir = candidate
+
+    if os.path.exists(frontend_dir):
+        assets_dir = os.path.join(frontend_dir, "assets")
+        if os.path.exists(assets_dir):
+            app.mount("/assets", StaticFiles(directory=assets_dir), name="assets")
+
+        @app.get("/{full_path:path}")
+        async def serve_spa(full_path: str):
+            target = os.path.join(frontend_dir, full_path)
+            if full_path and os.path.isfile(target):
+                return FileResponse(target)
+            index_file = os.path.join(frontend_dir, "index.html")
+            if os.path.isfile(index_file):
+                return FileResponse(index_file)
+            return {"message": "LingoStream v0.5.3"}
+    else:
+        @app.get("/")
+        async def root():
+            return {"message": "LingoStream v6.0 — PDF.js + Word Click Zones Reader"}
 
     return app
