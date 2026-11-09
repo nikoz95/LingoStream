@@ -4,7 +4,7 @@ WORKDIR /app/frontend
 COPY frontend/package.json frontend/package-lock.json ./
 RUN npm ci
 COPY frontend/ ./
-RUN npm run build
+RUN chmod -R +x node_modules/.bin && npx --no-install vite build
 
 # ── Main Runtime: Debian Bookworm with Python 3.11 ──
 FROM python:3.11-slim-bookworm
