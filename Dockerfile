@@ -19,6 +19,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     redis-server \
     nginx \
     curl \
+    wget \
     gcc \
     g++ \
     make \
@@ -30,9 +31,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     zlib1g-dev \
     && rm -rf /var/lib/apt/lists/*
 
-# Install official MinIO binary
-RUN curl -fsSL -o /usr/local/bin/minio https://dl.min.io/server/minio/release/linux-amd64/minio && \
-    chmod +x /usr/local/bin/minio
+# Copy official MinIO binary directly from the official MinIO container image
+COPY --from=minio/minio:latest /opt/bin/minio /usr/local/bin/minio
 
 # Install Python backend dependencies
 WORKDIR /app/backend
