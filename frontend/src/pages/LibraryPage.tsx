@@ -118,6 +118,13 @@ export default function LibraryPage() {
         </h1>
         <div className="flex items-center gap-3">
           <button
+            onClick={() => navigate('/writing')}
+            className="px-4 py-2 text-sm rounded-xl border border-purple-400/30 bg-purple-500/10 hover:bg-purple-500/20 hover:border-purple-400/50 transition-all duration-200 flex items-center gap-2 cursor-pointer"
+          >
+            <span>✍️</span>
+            <span>Writing</span>
+          </button>
+          <button
             onClick={() => navigate('/vocabulary')}
             className="px-4 py-2 text-sm rounded-xl border border-white/15 hover:bg-white/10 hover:border-purple-400/30 transition-all duration-200 flex items-center gap-2"
           >

@@ -326,6 +326,13 @@ export default function VocabularyPage() {
           </div>
 
           <div className="flex items-center gap-3">
+            <button
+              onClick={() => navigate('/writing')}
+              className="px-4 py-2 text-sm rounded-xl border border-purple-400/30 bg-purple-500/10 hover:bg-purple-500/20 text-white font-medium transition-colors flex items-center gap-2 cursor-pointer"
+            >
+              <span>✍️</span>
+              <span>Writing</span>
+            </button>
             {learningCount > 0 && (
               <button
                 onClick={() => startGame(selectedBookFilter, 'quiz')}
@@ -396,7 +403,7 @@ export default function VocabularyPage() {
               {Array.from(groupedByBook.entries()).map(([bookKey, groupWords]) => {
                 const bookObj = typeof bookKey === 'number' ? bookMap.get(bookKey) : null;
                 const label =
-                  bookObj?.title || (bookKey === 'unassigned' ? 'სხვა სიტყვები' : `წიგნი #${bookKey}`);
+                  bookObj?.title || (bookKey === 'unassigned' ? 'Writing / სხვა სიტყვები' : `წიგნი #${bookKey}`);
                 const active = selectedBookFilter === bookKey;
                 const unmasteredInBook = groupWords.filter((w) => !w.is_mastered).length;
 
@@ -424,7 +431,7 @@ export default function VocabularyPage() {
               {visibleGroups.map(([bookKey, groupWords]) => {
                 const bookObj = typeof bookKey === 'number' ? bookMap.get(bookKey) : null;
                 const bookTitle =
-                  bookObj?.title || (bookKey === 'unassigned' ? 'ზოგადი ლექსიკონი' : `წიგნი #${bookKey}`);
+                  bookObj?.title || (bookKey === 'unassigned' ? 'Writing & ზოგადი ლექსიკონი' : `წიგნი #${bookKey}`);
                 const bookAuthor = bookObj?.author;
                 const masteredInGroup = groupWords.filter((w) => w.is_mastered).length;
                 const unmasteredInGroup = groupWords.length - masteredInGroup;

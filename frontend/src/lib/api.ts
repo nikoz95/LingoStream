@@ -460,3 +460,137 @@ export async function getBookPageCount(bookId: number): Promise<PageCountRespons
   return request<PageCountResponse>(`/pages/${bookId}/page-count`);
 }
 
+// ── Writing & Speaking Studio API ──
+
+export interface SuggestedWordItem {
+  word: string;
+  phonetic?: string;
+  translation?: string;
+  definition?: string;
+  sentence_context?: string;
+  sentence_context_translated?: string;
+}
+
+export interface CorrectionItem {
+  original: string;
+  corrected: string;
+  type: string;
+  short_explanation: string;
+}
+
+export interface SpeakingConnectorItem {
+  phrase: string;
+  meaning: string;
+  example: string;
+}
+
+export interface EvaluateWritingRequest {
+  text: string;
+  topic?: string;
+  target_language?: string;
+  native_language?: string;
+  provider?: string | null;
+}
+
+export interface EvaluateWritingResponse {
+  corrected_text: string;
+  natural_spoken_text: string;
+  elevated_text: string;
+  cefr_level: string;
+  overall_feedback: string;
+  speaking_connectors: SpeakingConnectorItem[];
+  corrections: CorrectionItem[];
+  suggested_words: SuggestedWordItem[];
+}
+
+export interface WritingChatMessage {
+  role: 'user' | 'assistant';
+  content: string;
+}
+
+export interface ChatUserFeedback {
+  is_perfect: boolean;
+  corrected: string;
+  natural_alternative: string;
+  short_explanation: string;
+  corrections: CorrectionItem[];
+  suggested_words: SuggestedWordItem[];
+}
+
+export interface WritingChatRequest {
+  messages: WritingChatMessage[];
+  scenario: string;
+  target_language?: string;
+  native_language?: string;
+  provider?: string | null;
+}
+
+export interface WritingChatResponse {
+  reply: string;
+  reply_translation: string;
+  user_feedback: ChatUserFeedback | null;
+}
+
+export interface DeepDiveExampleItem {
+  correct: string;
+  translation: string;
+  wrong_variant?: string;
+}
+
+export interface DeepDiveExplainRequest {
+  original_text: string;
+  corrected_text: string;
+  context_sentence?: string;
+  question?: string;
+  history?: WritingChatMessage[];
+  target_language?: string;
+  native_language?: string;
+  provider?: string | null;
+}
+
+export interface DeepDiveExplainResponse {
+  answer: string;
+  grammar_rule_title: string;
+  examples: DeepDiveExampleItem[];
+  suggested_words: SuggestedWordItem[];
+}
+
+export async function evaluateWriting(req: EvaluateWritingRequest): Promise<EvaluateWritingResponse> {
+  return request<EvaluateWritingResponse>('/writing/evaluate', {
+    method: 'POST',
+    body: JSON.stringify(req),
+  });
+}
+
+export async function sendWritingChat(req: WritingChatRequest): Promise<WritingChatResponse> {
+  return request<WritingChatResponse>('/writing/chat', {
+    method: 'POST',
+    body: JSON.stringify(req),
+  });
+}
+
+export async function explainWritingDeepDive(
+  req: DeepDiveExplainRequest,
+): Promise<DeepDiveExplainResponse> {
+  return request<DeepDiveExplainResponse>('/writing/explain', {
+    method: 'POST',
+    body: JSON.stringify(req),
+  });
+}
+
+export async function translateWritingWord(
+  word: string,
+  sentenceContext: string = '',
+): Promise<TranslateWordResponse> {
+  return request<TranslateWordResponse>('/writing/translate-word', {
+    method: 'POST',
+    body: JSON.stringify({
+      word,
+      sentence_context: sentenceContext,
+      source_language: 'en',
+      target_language: 'ka',
+    }),
+  });
+}
+
+

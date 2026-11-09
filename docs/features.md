@@ -6,7 +6,13 @@ PDF Processing:
 
 UI Components:
 - React components: src/components/
+- Pages: src/pages/ (LibraryPage, ReaderPage, VocabularyPage, WritingPage)
 - Styling: Tailwind CSS (frontend/node_modules/@tailwindcss)
+
+Writing & Speaking Studio:
+- Frontend: frontend/src/pages/WritingPage.tsx
+- Backend AI service: backend/infrastructure/ai/writing_service.py
+- Backend routes: backend/infrastructure/web/api/v1/routes/writing_router.py
 
 Build System:
 - Vite config: vite.config.js (to be added)

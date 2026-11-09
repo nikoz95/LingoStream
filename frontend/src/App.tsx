@@ -4,6 +4,7 @@ import LoginPage from './pages/LoginPage';
 import LibraryPage from './pages/LibraryPage';
 import ReaderPage from './pages/ReaderPage';
 import VocabularyPage from './pages/VocabularyPage';
+import WritingPage from './pages/WritingPage';
 import LoadingSpinner from './components/LoadingSpinner';
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
@@ -46,6 +47,14 @@ export default function App() {
         element={
           <ProtectedRoute>
             <VocabularyPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/writing"
+        element={
+          <ProtectedRoute>
+            <WritingPage />
           </ProtectedRoute>
         }
       />
