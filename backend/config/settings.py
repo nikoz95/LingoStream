@@ -25,13 +25,13 @@ class Settings(BaseSettings):
     # ── LLM (default OpenAI-compatible) ───────────────────────
     LLM_API_KEY: str = ""
     LLM_BASE_URL: str = "https://generativelanguage.googleapis.com/v1beta/openai/"
-    LLM_MODEL: str = "gemini-3.5-flash"
+    LLM_MODEL: str = "gemini-2.5-flash"
     LLM_PROVIDER: str = "openai"
 
     # ── Gemini ────────────────────────────────────────────────
     GEMINI_API_KEY: str = ""
     GEMINI_BASE_URL: str = "https://generativelanguage.googleapis.com/v1beta/openai/"
-    GEMINI_MODEL: str = "gemini-3.5-flash"
+    GEMINI_MODEL: str = "gemini-2.5-flash"
 
     # ── DeepSeek ──────────────────────────────────────────────
     DEEPSEEK_API_KEY: str = ""

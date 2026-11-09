@@ -10,7 +10,10 @@ ENV DEBIAN_FRONTEND=noninteractive \
     S3_ACCESS_KEY_ID=minioadmin \
     S3_SECRET_ACCESS_KEY=minioadmin \
     S3_BUCKET_NAME=lingostream-books \
-    S3_PUBLIC_URL=/api/v1/books
+    S3_PUBLIC_URL=/api/v1/books \
+    LLM_PROVIDER=openai \
+    LLM_MODEL=gemini-2.5-flash \
+    LLM_BASE_URL=https://generativelanguage.googleapis.com/v1beta/openai/
 
 # Install PostgreSQL 15, Redis, curl, and build tools
 RUN apt-get update && apt-get install -y --no-install-recommends \

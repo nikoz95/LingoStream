@@ -104,9 +104,9 @@ def _resolve_provider(provider: Optional[str] = None):
 def _fallback_models_for(primary_model: str, base_url: str) -> list[str]:
     """Return ordered list of models to try when a Gemini model hits 429 rate-limit."""
     if "generativelanguage.googleapis.com" in (base_url or ""):
-        models = ["gemini-3.5-flash-lite"]
+        models = ["gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-1.5-flash"]
         if primary_model not in models:
-            models.append(primary_model)
+            models.insert(0, primary_model)
         return models
     return [primary_model]
 
