@@ -5,9 +5,10 @@ LingoStream is a web app for streaming language content:
 
 ## How to Approach Any New Task
 
-1. **Understand first, then act.** Read the files involved before editing. For a
-   bug: reproduce/trace it. For a feature: find the closest existing feature and
-   imitate its pattern.
+1. **Understand first, then act (Token-Efficient Navigation).** Before running
+   exploratory `dir` or search commands, check `docs/features.md`, `docs/api.md`,
+   and `docs/architecture.md` to jump directly to the exact file paths. Read only
+   the files involved before editing.
 2. **Locate the right layer** using the map below. Backend is DDD-style:
    `domain/` (entities, repositories — no framework imports) →
    `infrastructure/` (web, database, ai, security) → `main.py` (entry point).

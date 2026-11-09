@@ -1,113 +1,92 @@
-# Repository Architecture
+# LingoStream — Repository Architecture
 
-## Frontend Monorepo Structure
+## Core Product Model
 
-- `frontend/` — Main application directory
-  - `node_modules/` — Dependencies (read-only)
-  - `src/` — Source code
+LingoStream consists of two independent language-acquisition pillars that feed into a shared dictionary:
 
-Key frontend boundaries (top → bottom):
-1. React Component Layer (`src/pages/`, `src/components/`)
-2. State Management Layer (`src/hooks/`)
-3. API Service Layer (`src/lib/`)
-4. Utility/Helper Layer
+```
+📖 Reader (EPUB / PDF) ──┐
+                         ├──► 🗂️ Vocabulary (Shared Dictionary & Flashcards/Quiz)
+✍️ Writing & Speaking  ──┘
+```
 
-Build system (frontend):
-- Vite (bundler + dev server)
-- TypeScript (strict type checking)
-- PDF.js (`pdfjs-dist`) for PDF rendering
+- **Reader** (`ReaderPage.tsx`) and **Writing** (`WritingPage.tsx`) are independent modules. Never tightly couple them to each other.
+- **Vocabulary** (`VocabularyPage.tsx`) stores words saved from books (`book_id` set) and from the Writing Studio (`book_id = null`).
 
-External dependencies: React/ReactDOM, Tailwind CSS.
+---
 
-## Project Structure
+## Backend Structure (`backend/`)
 
-The repository follows a standard frontend/backend separation with the following key directories:
+FastAPI + SQLAlchemy 2.0 (async `asyncpg`) + Pydantic v2.
 
-- `frontend/` - Contains all client-side code and assets
-- `backend/` - Contains server-side code and API endpoints
-- `docs/` - Documentation files (including this architecture document)
-- `Dockerfile` - Container configuration
-- `docker-compose.yml` - Service orchestration
+```
+backend/
+├── main.py                                         # Uvicorn entry point (imports create_app)
+├── config/
+│   └── settings.py                                 # Env settings (DB, JWT, S3/MinIO, LLM providers)
+├── domain/
+│   ├── entities/                                   # Pure domain models (book.py, user.py)
+│   └── repositories/                               # Abstract repository interfaces
+└── infrastructure/
+    ├── ai/
+    │   ├── translation_service.py                  # Passage & word translation (Gemini/DeepSeek/OpenAI/Local)
+    │   └── writing_service.py                      # Writing evaluation, Roleplay chat, Deep-Dive grammar tutor
+    ├── database/postgres/
+    │   ├── session.py                              # AsyncSession & SQLAlchemy engine
+    │   ├── models.py                               # ORM tables: users, books, chapters, paragraphs, vocabulary_words
+    │   ├── repositories.py                         # SQLAlchemy repository implementations
+    │   ├── epub_parser.py                          # EPUB ingestion & chapter extraction
+    │   └── pdf_parser.py                           # PyMuPDF (fitz) PDF word-position & text parser
+    ├── security/                                   # JWT token creation/verification & password hashing
+    └── web/api/v1/
+        ├── app.py                                  # FastAPI factory, CORS, startup migrations, SPA static serving
+        ├── dependencies.py                         # authenticate_request dependency
+        ├── schemas/
+        │   ├── auth_schemas.py                     # Auth Pydantic models
+        │   ├── book_schemas.py                     # Book, Chapter, Translation, Vocabulary Pydantic models
+        │   └── writing_schemas.py                  # Writing & Speaking Studio Pydantic models
+        └── routes/
+            ├── auth_router.py                      # /api/v1/auth/*
+            ├── book_router.py                      # /api/v1/books/*
+            ├── translation_router.py               # /api/v1/books/{id}/translate*
+            ├── page_router.py                      # /api/v1/pages/* (PDF word bounding boxes)
+            ├── vocabulary_router.py                # /api/v1/vocabulary/*
+            └── writing_router.py                   # /api/v1/writing/*
+```
 
-## Frontend/Backend Boundaries
+---
 
-### Frontend
-- Built with modern JavaScript frameworks (React, Vue, or similar)
-- Serves static assets and handles user interactions
-- Communicates with backend via RESTful API or GraphQL
-- Located in `/frontend` directory
+## Frontend Structure (`frontend/`)
 
-### Backend
-- Node.js/Express or similar framework
-- Provides API endpoints for frontend
-- Handles business logic and database operations
-- Located in `/backend` directory
+React 19 + TypeScript (strict) + Vite 6 + Tailwind CSS 4.
 
-## Main Components
-
-### Frontend Components
-- UI components (React/Vue components)
-- State management (Redux, Vuex, or similar)
-- Routing configuration
-- API service layer
-
-### Backend Components
-- API controllers
-- Service layer (business logic)
-- Database models/repositories
-- Middleware (authentication, validation)
-- Configuration management
-
-## Data Flow
-
-1. User interacts with frontend UI
-2. Frontend dispatches action to state management
-3. Frontend makes API request to backend
-4. Backend processes request through controllers
-5. Business logic executed in service layer
-6. Database operations performed via repositories
-7. Response sent back to frontend
-8. Frontend updates UI based on response
-
-## Docker Architecture
-
-The project uses Docker for containerization with the following components:
-
-- `Dockerfile` - Defines the application container
-- `docker-compose.yml` - Orchestrates multiple services:
-  - Frontend service (development server)
-  - Backend service (Node.js server)
-  - Database service (PostgreSQL/MySQL)
-  - Optional: Redis for caching
-
-## Important Dependencies
-
-### Frontend Dependencies
-- React/Vue core packages
-- Routing libraries
-- State management
-- UI component libraries
-- Build tools (Webpack, Vite, etc.)
-- Testing frameworks
-
-### Backend Dependencies
-- Express or similar web framework
-- Database drivers (pg, mysql2, etc.)
-- Authentication libraries (Passport, JWT)
-- Validation libraries (Joi, Zod)
-- Testing frameworks (Jest, Mocha)
-
-### Shared Dependencies
-- TypeScript (for type checking)
-- ESLint/Prettier (for code formatting)
-- Husky (for Git hooks)
-
-## Key Extension Points
-
-1. **API Endpoints** - Backend can be extended with new routes
-2. **Middleware** - Custom middleware can be added for authentication, logging, etc.
-3. **Frontend Components** - New UI components can be added following existing patterns
-4. **State Management** - New reducers/actions can be added to manage additional state
-5. **Database Models** - New models can be created following existing patterns
-6. **Docker Services** - Additional services can be added to docker-compose.yml
-7. **Configuration** - Environment variables can be extended for new features
+```
+frontend/src/
+├── main.tsx                                        # React root with BrowserRouter + AuthProvider
+├── App.tsx                                         # Route definitions (/login, /library, /reader/:bookId, /vocabulary, /writing)
+├── index.css                                       # Tailwind CSS + custom theme variables
+├── pages/
+│   ├── LoginPage.tsx                               # Login & registration UI
+│   ├── LibraryPage.tsx                             # Book upload (PDF/EPUB), list, delete, navigation
+│   ├── ReaderPage.tsx                              # Unified EPUB & PDF reader with word/sentence translation
+│   ├── VocabularyPage.tsx                          # Saved words grouped by book/Writing + Quiz & Flashcard games
+│   └── WritingPage.tsx                             # Free Writing Studio, AI Roleplay Chat, Deep-Dive grammar tutor
+├── components/
+│   ├── EpubViewer.tsx                              # foliate-js EPUB renderer wrapper
+│   ├── PageRenderer.tsx                            # PDF.js page canvas + word click overlay
+│   ├── ReaderHeader.tsx                            # Reader top bar, settings, TOC, progress
+│   ├── TranslationPanel.tsx                        # Desktop sidebar for word/passage translations
+│   ├── MobileTranslationSheet.tsx                  # Mobile bottom sheet for translations
+│   ├── MobileLoupe.tsx                             # Touch magnifier for mobile text selection
+│   ├── SearchPanel.tsx                             # In-book search sidebar
+│   ├── SettingsModal.tsx                           # Typography, theme, and AI provider settings
+│   ├── ThumbnailSidebar.tsx                        # Chapter/page navigation sidebar
+│   └── LoadingSpinner.tsx                          # Reusable spinner component
+└── lib/
+    ├── api.ts                                      # All backend API calls & token refresh interceptor
+    ├── auth.tsx                                    # AuthContext & useAuth hook
+    ├── textPicker.ts                               # Word & sentence boundary detection on click/drag
+    └── reader/
+        ├── EpubEngine.ts                           # foliate-js integration & styling engine
+        └── types.ts                                # Shared reader interfaces
+```
