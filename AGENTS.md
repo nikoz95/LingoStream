@@ -19,10 +19,23 @@ LingoStream is a web app for streaming language content:
 5. **Verify before done:**
    - Backend: `cd backend && python -m pytest tests/` (or the relevant test).
    - Frontend: `cd frontend && npm run build` (type-checks + bundles).
-6. **Keep docs in sync.** If you add a feature, API endpoint, or change a
-   command/config, update the matching doc below.
-7. **Never:** commit `.env` or secrets, delete user data in `backend/uploads/`,
-   or rewrite files wholesale when a small edit suffices.
+6. **Keep docs in sync (Mandatory).** Whenever you add a new feature, page, API
+   endpoint, or make a core architectural/config change, you **MUST** review and
+   update the corresponding files in `docs/` (`features.md`, `api.md`,
+   `architecture.md`, `deployment.md`) and `AGENTS.md` before finishing.
+7. **Strict Git Policy — NO Auto-Commit or Push:**
+   - **NEVER** run `git commit`, `git push`, `git merge`, `git rebase`, `git reset --hard`, or switch/create branches on your own.
+   - Only stage, commit, or push when the user **explicitly** commands it in that exact turn.
+8. **Database, Docker & Data Safety:**
+   - **NEVER** run `docker-compose down -v` or delete Docker volumes (`postgres_data`, `minio_data`), `backend/uploads/`, or `.env`.
+   - Database migrations in `backend/infrastructure/web/api/v1/app.py` must be strictly additive (`ADD COLUMN IF NOT EXISTS`). Never drop user tables or columns with user data.
+   - Do not rewrite files wholesale when a targeted edit suffices.
+9. **Module Boundaries (Reader / Writing / Vocabulary):**
+   - `Reader` (`ReaderPage.tsx`) and `Writing` (`WritingPage.tsx`) are independent modules; never acoplish features by tightly coupling them to each other.
+   - `Vocabulary` (`VocabularyPage.tsx`) is the shared dictionary layer that receives saved words from both `Reader` (`book_id` set) and `Writing` (`book_id = null`).
+10. **Dual Docker Build Synchronization (Local Docker vs Koyeb/Render):**
+    - The project has two Docker setups: local multi-container (`docker-compose.yml` + `frontend/Dockerfile` + `backend/Dockerfile`) and single-container cloud deployment (root `Dockerfile` + `Dockerfile.koyeb`, which copies `frontend/dist` directly into `/app/frontend/dist`).
+    - Whenever you modify anything in `frontend/`, you **MUST** run `cd frontend && npm.cmd run build` so `frontend/dist` stays in sync for cloud deployments, and ensure `frontend/Dockerfile` also builds cleanly.
 
 ## Quick Map
 

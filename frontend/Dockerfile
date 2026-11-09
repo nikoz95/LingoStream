@@ -7,7 +7,7 @@ WORKDIR /app
 COPY package.json package-lock.json ./
 
 # Install dependencies
-RUN npm ci
+RUN npm ci && sed -i "s|const { makePDF } = await import('./pdf.js')|throw new Error('PDF handled natively')|g" node_modules/foliate-js/view.js
 
 # Copy source code
 COPY . .
@@ -37,7 +37,7 @@ WORKDIR /app
 COPY package.json package-lock.json ./
 
 # Install dependencies
-RUN npm ci
+RUN npm ci && sed -i "s|const { makePDF } = await import('./pdf.js')|throw new Error('PDF handled natively')|g" node_modules/foliate-js/view.js
 
 # Copy source code
 COPY . .
