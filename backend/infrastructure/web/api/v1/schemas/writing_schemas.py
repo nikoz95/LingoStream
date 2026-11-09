@@ -1,4 +1,5 @@
 """Pydantic schemas for the Writing & Speaking Studio endpoints."""
+from datetime import datetime
 from typing import List, Optional
 from pydantic import BaseModel, Field
 
@@ -34,6 +35,7 @@ class EvaluateWritingRequest(BaseModel):
 
 
 class EvaluateWritingResponse(BaseModel):
+    submission_id: Optional[int] = None
     corrected_text: str
     natural_spoken_text: str
     elevated_text: str
@@ -42,6 +44,53 @@ class EvaluateWritingResponse(BaseModel):
     speaking_connectors: List[SpeakingConnectorItem] = []
     corrections: List[CorrectionItem] = []
     suggested_words: List[SuggestedWordItem] = []
+
+
+class WritingSubmissionItem(BaseModel):
+    id: int
+    topic: Optional[str] = ""
+    original_text: str
+    corrected_text: str
+    natural_spoken_text: str
+    elevated_text: str
+    cefr_level: str = "B1"
+    overall_feedback: str = ""
+    speaking_connectors: List[SpeakingConnectorItem] = []
+    corrections: List[CorrectionItem] = []
+    suggested_words: List[SuggestedWordItem] = []
+    created_at: Optional[datetime] = None
+
+
+class WritingSubmissionListResponse(BaseModel):
+    submissions: List[WritingSubmissionItem]
+    total: int
+
+
+class UserExamplePair(BaseModel):
+    wrong: str
+    right: str
+
+
+class MicroDrillItem(BaseModel):
+    prompt_ka: str
+    hint: Optional[str] = ""
+    correct_answer: str
+    explanation_ka: Optional[str] = ""
+
+
+class WeakSpotItem(BaseModel):
+    category: str
+    frequency_label: Optional[str] = ""
+    why_it_happens: str = ""
+    golden_rule: str = ""
+    user_examples: List[UserExamplePair] = []
+    drills: List[MicroDrillItem] = []
+
+
+class PatternAnalysisResponse(BaseModel):
+    overall_summary: str
+    level_trend: str = "B1"
+    weak_spots: List[WeakSpotItem] = []
 
 
 class ChatMessageItem(BaseModel):

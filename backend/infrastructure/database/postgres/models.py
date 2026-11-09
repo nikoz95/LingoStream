@@ -122,3 +122,23 @@ class VocabularyWord(Base):
     translation = Column(Text, nullable=True)
     is_mastered = Column(Boolean, default=False, nullable=False)
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+
+
+class WritingSubmission(Base):
+    """Saved writing submissions and AI evaluations for a user."""
+    __tablename__ = "writing_submissions"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    topic = Column(String(500), nullable=True)
+    original_text = Column(Text, nullable=False)
+    corrected_text = Column(Text, nullable=False)
+    natural_spoken_text = Column(Text, nullable=False)
+    elevated_text = Column(Text, nullable=False)
+    cefr_level = Column(String(20), default="B1")
+    overall_feedback = Column(Text, nullable=True)
+    corrections_json = Column(Text, default="[]")
+    suggested_words_json = Column(Text, default="[]")
+    speaking_connectors_json = Column(Text, default="[]")
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+

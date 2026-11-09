@@ -30,13 +30,15 @@ Use this file to jump directly to the files implementing a feature without searc
 
 ## 4. Writing & Speaking Studio (`/writing`)
 - **Frontend Page:** `frontend/src/pages/WritingPage.tsx`
-  - **Free Writing Studio:** Mixed Georgian/English writing support, voice dictation (`SpeechRecognition`), 3-tier AI rewrites (`Natural Spoken`, `Grammar Corrected`, `Elevated`), clickable word lookup, speaking connectors.
+  - **Free Writing Studio:** Mixed Georgian/English writing support, localStorage draft auto-save, voice dictation (`SpeechRecognition`), 3-tier AI rewrites (`Natural Spoken`, `Grammar Corrected`, `Elevated`), clickable word lookup, speaking connectors.
   - **AI Roleplay & Live Chat:** Interactive scenario conversations with inline coaching cards and audio playback (`speechSynthesis`).
-  - **Contextual Deep-Dive Tutor (`🔍 რატომ? / ჩაეძიე`):** Inline expandable grammar & nuance Q&A thread on any correction or phrase.
-- **Frontend API:** `frontend/src/lib/api.ts` (`evaluateWriting`, `sendWritingChat`, `explainWritingDeepDive`, `translateWritingWord`)
+  - **Saved Writings History & Weak Spots Diagnostic (`📜 თემები & ანალიზი`):** Lists saved essays from PostgreSQL (`writing_submissions`), reloads any past essay into the studio, and runs AI pattern diagnostics across essays with interactive **Micro-Drills** to fix recurring mistakes.
+  - **Contextual Deep-Dive Tutor (`🔍 რატომ? / ჩაეძიე`):** Inline expandable grammar & nuance Q&A thread on any correction, phrase, or micro-drill.
+- **Frontend API:** `frontend/src/lib/api.ts` (`evaluateWriting`, `listWritingSubmissions`, `deleteWritingSubmission`, `analyzeWritingPatterns`, `sendWritingChat`, `explainWritingDeepDive`, `translateWritingWord`)
 - **Backend Routes:** `backend/infrastructure/web/api/v1/routes/writing_router.py`
 - **Backend Schemas:** `backend/infrastructure/web/api/v1/schemas/writing_schemas.py`
 - **Backend AI Service:** `backend/infrastructure/ai/writing_service.py`
+- **ORM Model:** `WritingSubmission` (`writing_submissions`) in `backend/infrastructure/database/postgres/models.py`
 
 ## 5. Vocabulary & Mini-Games (`/vocabulary`)
 - **Frontend Page:** `frontend/src/pages/VocabularyPage.tsx`

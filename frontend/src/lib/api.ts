@@ -493,6 +493,7 @@ export interface EvaluateWritingRequest {
 }
 
 export interface EvaluateWritingResponse {
+  submission_id?: number | null;
   corrected_text: string;
   natural_spoken_text: string;
   elevated_text: string;
@@ -501,6 +502,53 @@ export interface EvaluateWritingResponse {
   speaking_connectors: SpeakingConnectorItem[];
   corrections: CorrectionItem[];
   suggested_words: SuggestedWordItem[];
+}
+
+export interface WritingSubmissionItem {
+  id: number;
+  topic?: string;
+  original_text: string;
+  corrected_text: string;
+  natural_spoken_text: string;
+  elevated_text: string;
+  cefr_level: string;
+  overall_feedback: string;
+  speaking_connectors: SpeakingConnectorItem[];
+  corrections: CorrectionItem[];
+  suggested_words: SuggestedWordItem[];
+  created_at?: string | null;
+}
+
+export interface WritingSubmissionListResponse {
+  submissions: WritingSubmissionItem[];
+  total: number;
+}
+
+export interface UserExamplePair {
+  wrong: string;
+  right: string;
+}
+
+export interface MicroDrillItem {
+  prompt_ka: string;
+  hint?: string;
+  correct_answer: string;
+  explanation_ka?: string;
+}
+
+export interface WeakSpotItem {
+  category: string;
+  frequency_label?: string;
+  why_it_happens: string;
+  golden_rule: string;
+  user_examples: UserExamplePair[];
+  drills: MicroDrillItem[];
+}
+
+export interface PatternAnalysisResponse {
+  overall_summary: string;
+  level_trend: string;
+  weak_spots: WeakSpotItem[];
 }
 
 export interface WritingChatMessage {
@@ -592,5 +640,22 @@ export async function translateWritingWord(
     }),
   });
 }
+
+export async function listWritingSubmissions(): Promise<WritingSubmissionListResponse> {
+  return request<WritingSubmissionListResponse>('/writing/submissions');
+}
+
+export async function deleteWritingSubmission(submissionId: number): Promise<void> {
+  return request<void>(`/writing/submissions/${submissionId}`, {
+    method: 'DELETE',
+  });
+}
+
+export async function analyzeWritingPatterns(): Promise<PatternAnalysisResponse> {
+  return request<PatternAnalysisResponse>('/writing/analyze-patterns', {
+    method: 'POST',
+  });
+}
+
 
 

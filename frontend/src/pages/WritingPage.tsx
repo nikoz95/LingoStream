@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   evaluateWriting,
@@ -6,6 +6,9 @@ import {
   explainWritingDeepDive,
   translateWritingWord,
   saveVocabularyWord,
+  listWritingSubmissions,
+  deleteWritingSubmission,
+  analyzeWritingPatterns,
   logout,
   type EvaluateWritingResponse,
   type CorrectionItem,
@@ -13,10 +16,12 @@ import {
   type WritingChatMessage,
   type ChatUserFeedback,
   type DeepDiveExplainResponse,
+  type WritingSubmissionItem,
+  type PatternAnalysisResponse,
 } from '../lib/api';
 import LoadingSpinner from '../components/LoadingSpinner';
 
-type StudioMode = 'free' | 'chat';
+type StudioMode = 'free' | 'chat' | 'history';
 type RewriteTab = 'corrected' | 'spoken' | 'elevated';
 
 interface DeepDiveThreadState {
@@ -95,13 +100,88 @@ export default function WritingPage() {
   const navigate = useNavigate();
   const [mode, setMode] = useState<StudioMode>('free');
 
-  // ── Free Writing State ──
-  const [topic, setTopic] = useState('');
-  const [text, setText] = useState('');
+  // ── Free Writing State (with localStorage draft persistence) ──
+  const [topic, setTopic] = useState(() => localStorage.getItem('ls_writing_draft_topic') || '');
+  const [text, setText] = useState(() => localStorage.getItem('ls_writing_draft_text') || '');
   const [evaluating, setEvaluating] = useState(false);
   const [evalError, setEvalError] = useState('');
   const [evalResult, setEvalResult] = useState<EvaluateWritingResponse | null>(null);
   const [activeRewriteTab, setActiveRewriteTab] = useState<RewriteTab>('spoken');
+
+  // ── Saved Writings History & Pattern Analysis State ──
+  const [submissions, setSubmissions] = useState<WritingSubmissionItem[]>([]);
+  const [loadingSubmissions, setLoadingSubmissions] = useState(false);
+  const [patternAnalysis, setPatternAnalysis] = useState<PatternAnalysisResponse | null>(null);
+  const [analyzingPatterns, setAnalyzingPatterns] = useState(false);
+  const [patternError, setPatternError] = useState('');
+  const [drillInputs, setDrillInputs] = useState<Record<string, string>>({});
+  const [drillRevealed, setDrillRevealed] = useState<Record<string, boolean>>({});
+
+  useEffect(() => {
+    localStorage.setItem('ls_writing_draft_topic', topic);
+  }, [topic]);
+
+  useEffect(() => {
+    localStorage.setItem('ls_writing_draft_text', text);
+  }, [text]);
+
+  const fetchSubmissions = useCallback(async () => {
+    setLoadingSubmissions(true);
+    try {
+      const res = await listWritingSubmissions();
+      setSubmissions(res.submissions);
+    } catch {
+      // ignore
+    } finally {
+      setLoadingSubmissions(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchSubmissions();
+  }, [fetchSubmissions]);
+
+  const handleAnalyzePatterns = useCallback(async () => {
+    setAnalyzingPatterns(true);
+    setPatternError('');
+    try {
+      const res = await analyzeWritingPatterns();
+      setPatternAnalysis(res);
+    } catch (err) {
+      setPatternError(err instanceof Error ? err.message : 'ანალიზი ვერ მოხერხდა');
+    } finally {
+      setAnalyzingPatterns(false);
+    }
+  }, []);
+
+  const handleDeleteSubmission = useCallback(async (id: number) => {
+    if (!window.confirm('წავშალოთ ეს თემა ისტორიიდან?')) return;
+    try {
+      await deleteWritingSubmission(id);
+      setSubmissions((prev) => prev.filter((s) => s.id !== id));
+    } catch {
+      // ignore
+    }
+  }, []);
+
+  const handleLoadSubmissionIntoStudio = useCallback((sub: WritingSubmissionItem) => {
+    setTopic(sub.topic || '');
+    setText(sub.original_text);
+    setEvalResult({
+      submission_id: sub.id,
+      corrected_text: sub.corrected_text,
+      natural_spoken_text: sub.natural_spoken_text,
+      elevated_text: sub.elevated_text,
+      cefr_level: sub.cefr_level,
+      overall_feedback: sub.overall_feedback,
+      speaking_connectors: sub.speaking_connectors,
+      corrections: sub.corrections,
+      suggested_words: sub.suggested_words,
+    });
+    setOpenDeepDiveIds({});
+    setDeepDiveThreads({});
+    setMode('free');
+  }, []);
 
   // ── Deep Dive ("რატომ? / ჩაეძიე") State keyed by unique ID ──
   const [openDeepDiveIds, setOpenDeepDiveIds] = useState<Record<string, boolean>>({});
@@ -259,12 +339,13 @@ export default function WritingPage() {
         native_language: 'ka',
       });
       setEvalResult(res);
+      fetchSubmissions();
     } catch (err) {
       setEvalError(err instanceof Error ? err.message : 'ანალიზი ვერ მოხერხდა');
     } finally {
       setEvaluating(false);
     }
-  }, [text, topic]);
+  }, [text, topic, fetchSubmissions]);
 
   // ── Deep Dive ("რატომ? / ჩაეძიე") Trigger & Follow-up ──
   const askDeepDive = useCallback(
@@ -684,17 +765,17 @@ export default function WritingPage() {
       <main className="max-w-6xl mx-auto px-3 sm:px-6 lg:px-8 py-4 sm:py-6 space-y-4 sm:space-y-6">
         {/* Mode Switcher Tabs */}
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-          <div className="grid grid-cols-2 sm:inline-flex p-1 rounded-2xl bg-white/5 border border-white/10 w-full sm:w-auto">
+          <div className="grid grid-cols-3 sm:inline-flex p-1 rounded-2xl bg-white/5 border border-white/10 w-full sm:w-auto">
             <button
               onClick={() => setMode('free')}
-              className={`px-3 sm:px-5 py-2.5 rounded-xl text-xs sm:text-sm font-semibold transition-all cursor-pointer flex items-center justify-center gap-1.5 sm:gap-2 ${
+              className={`px-2.5 sm:px-5 py-2.5 rounded-xl text-xs sm:text-sm font-semibold transition-all cursor-pointer flex items-center justify-center gap-1.5 sm:gap-2 ${
                 mode === 'free'
                   ? 'bg-gradient-to-r from-purple-600 to-indigo-600 text-white shadow-lg shadow-purple-600/30'
                   : 'text-white/60 hover:text-white'
               }`}
             >
               <span>📝</span>
-              <span>Free Writing</span>
+              <span className="truncate">Free Writing</span>
             </button>
             <button
               onClick={() => {
@@ -703,14 +784,28 @@ export default function WritingPage() {
                   startNewChat();
                 }
               }}
-              className={`px-3 sm:px-5 py-2.5 rounded-xl text-xs sm:text-sm font-semibold transition-all cursor-pointer flex items-center justify-center gap-1.5 sm:gap-2 ${
+              className={`px-2.5 sm:px-5 py-2.5 rounded-xl text-xs sm:text-sm font-semibold transition-all cursor-pointer flex items-center justify-center gap-1.5 sm:gap-2 ${
                 mode === 'chat'
                   ? 'bg-gradient-to-r from-purple-600 to-indigo-600 text-white shadow-lg shadow-purple-600/30'
                   : 'text-white/60 hover:text-white'
               }`}
             >
               <span>💬</span>
-              <span>AI Roleplay Chat</span>
+              <span className="truncate">Roleplay Chat</span>
+            </button>
+            <button
+              onClick={() => {
+                setMode('history');
+                fetchSubmissions();
+              }}
+              className={`px-2.5 sm:px-5 py-2.5 rounded-xl text-xs sm:text-sm font-semibold transition-all cursor-pointer flex items-center justify-center gap-1.5 sm:gap-2 ${
+                mode === 'history'
+                  ? 'bg-gradient-to-r from-purple-600 to-indigo-600 text-white shadow-lg shadow-purple-600/30'
+                  : 'text-white/60 hover:text-white'
+              }`}
+            >
+              <span>📜</span>
+              <span className="truncate">თემები & ანალიზი ({submissions.length})</span>
             </button>
           </div>
 
@@ -1475,6 +1570,319 @@ export default function WritingPage() {
                 >
                   გაგზავნა
                 </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ===================================================================== */}
+        {/* MODE 3: SAVED WRITINGS HISTORY & WEAK SPOTS DIAGNOSTIC                */}
+        {/* ===================================================================== */}
+        {mode === 'history' && (
+          <div className="space-y-6">
+            {/* Top Diagnostic Card: Common Problems Analysis & Micro-Drills */}
+            <div className="rounded-2xl bg-gradient-to-br from-indigo-950/60 via-purple-950/50 to-gray-950 border border-indigo-400/30 p-5 sm:p-6 space-y-5">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                <div className="space-y-1">
+                  <h2 className="text-base sm:text-lg font-bold text-white flex items-center gap-2">
+                    <span>📊</span>
+                    <span>საერთო პრობლემების ანალიზი & პრაქტიკული ფიქსი</span>
+                  </h2>
+                  <p className="text-xs text-white/60 leading-relaxed">
+                    AI გადახედავს შენს ყველა შენახულ თემას, იპოვის განმეორებად შეცდომებს, აგიხსნის „ოქროს წესს“ და მოგცემს წერტილოვან სავარჯიშოებს.
+                  </p>
+                </div>
+
+                <button
+                  onClick={handleAnalyzePatterns}
+                  disabled={analyzingPatterns || submissions.length === 0}
+                  className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 disabled:opacity-40 text-xs sm:text-sm font-semibold text-white shadow-lg shadow-indigo-600/30 transition-all cursor-pointer shrink-0 flex items-center justify-center gap-2"
+                >
+                  <span>🧠</span>
+                  <span>
+                    {analyzingPatterns
+                      ? 'AI აანალიზებს თემებს...'
+                      : 'გააანალიზე ჩემი სუსტი წერტილები'}
+                  </span>
+                </button>
+              </div>
+
+              {analyzingPatterns && (
+                <div className="py-6">
+                  <LoadingSpinner message="AI სწავლობს შენს თემებს, აჯგუფებს შეცდომებს და ამზადებს პერსონალურ სავარჯიშოებს..." />
+                </div>
+              )}
+
+              {patternError && (
+                <div className="p-3 rounded-xl bg-red-500/10 border border-red-500/20 text-xs text-red-400">
+                  {patternError}
+                </div>
+              )}
+
+              {patternAnalysis && !analyzingPatterns && (
+                <div className="space-y-5 pt-2 border-t border-white/10">
+                  <div className="flex flex-wrap items-center justify-between gap-2 bg-black/30 border border-white/10 rounded-xl p-4">
+                    <p className="text-sm text-white/90 leading-relaxed flex-1">
+                      {patternAnalysis.overall_summary}
+                    </p>
+                    {patternAnalysis.level_trend && (
+                      <span className="px-3 py-1 rounded-full bg-emerald-500/20 border border-emerald-400/40 text-xs font-bold text-emerald-300 shrink-0">
+                        📈 ტრენდი: {patternAnalysis.level_trend}
+                      </span>
+                    )}
+                  </div>
+
+                  {/* Weak Spots List */}
+                  <div className="grid grid-cols-1 gap-4">
+                    {patternAnalysis.weak_spots.map((wsItem, wIdx) => (
+                      <div
+                        key={wIdx}
+                        className="rounded-2xl bg-black/40 border border-white/15 p-4 sm:p-5 space-y-4"
+                      >
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <h3 className="text-sm sm:text-base font-bold text-purple-300 flex items-center gap-2">
+                            <span>🎯</span>
+                            <span>
+                              #{wIdx + 1} {wsItem.category}
+                            </span>
+                          </h3>
+                          {wsItem.frequency_label && (
+                            <span className="px-2.5 py-0.5 rounded-full bg-amber-500/20 border border-amber-400/40 text-[11px] font-semibold text-amber-200">
+                              {wsItem.frequency_label}
+                            </span>
+                          )}
+                        </div>
+
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                          <div className="rounded-xl bg-white/[0.03] border border-white/10 p-3.5 space-y-1">
+                            <span className="text-[11px] font-semibold uppercase tracking-wider text-red-300">
+                              ❓ რატომ მოგდის ეს შეცდომა:
+                            </span>
+                            <p className="text-xs text-white/80 leading-relaxed">
+                              {wsItem.why_it_happens}
+                            </p>
+                          </div>
+
+                          <div className="rounded-xl bg-emerald-950/30 border border-emerald-500/30 p-3.5 space-y-1">
+                            <span className="text-[11px] font-semibold uppercase tracking-wider text-emerald-300">
+                              💡 ოქროს წესი / სოლუშენი:
+                            </span>
+                            <p className="text-xs text-emerald-100 font-medium leading-relaxed">
+                              {wsItem.golden_rule}
+                            </p>
+                          </div>
+                        </div>
+
+                        {/* Examples from User's Own Writings */}
+                        {wsItem.user_examples && wsItem.user_examples.length > 0 && (
+                          <div className="space-y-1.5">
+                            <span className="text-xs font-semibold text-white/60">
+                              📌 მაგალითები შენი თემებიდან:
+                            </span>
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                              {wsItem.user_examples.map((ex, eIdx) => (
+                                <div
+                                  key={eIdx}
+                                  className="rounded-lg bg-white/[0.03] border border-white/10 p-2.5 text-xs space-y-1"
+                                >
+                                  <div className="text-red-300/85 line-through">❌ {ex.wrong}</div>
+                                  <div className="text-emerald-300 font-medium">
+                                    ✅ {renderInteractiveText(ex.right)}
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Interactive Micro-Drills to Fix the Habit */}
+                        {wsItem.drills && wsItem.drills.length > 0 && (
+                          <div className="pt-2 border-t border-white/10 space-y-3">
+                            <span className="text-xs font-semibold text-indigo-300 block">
+                              🏋️ პრაქტიკული ფიქსი (გადათარგმნე / გაასწორე წესის მიხედვით):
+                            </span>
+                            {wsItem.drills.map((drill, dIdx) => {
+                              const drillKey = `drill-${wIdx}-${dIdx}`;
+                              const userAttempt = drillInputs[drillKey] || '';
+                              const isRevealed = !!drillRevealed[drillKey];
+
+                              return (
+                                <div
+                                  key={dIdx}
+                                  className="rounded-xl bg-indigo-950/30 border border-indigo-400/25 p-3.5 space-y-2.5"
+                                >
+                                  <div className="text-xs sm:text-sm text-white font-medium">
+                                    {dIdx + 1}. {drill.prompt_ka}
+                                  </div>
+                                  {drill.hint && (
+                                    <div className="text-[11px] text-indigo-300/80">
+                                      მინიშნება: {drill.hint}
+                                    </div>
+                                  )}
+
+                                  <div className="flex flex-col sm:flex-row gap-2">
+                                    <input
+                                      type="text"
+                                      value={userAttempt}
+                                      onChange={(e) =>
+                                        setDrillInputs((prev) => ({
+                                          ...prev,
+                                          [drillKey]: e.target.value,
+                                        }))
+                                      }
+                                      placeholder="ჩაწერე შენი ვერსია ინგლისურად..."
+                                      className="flex-1 bg-black/40 border border-white/15 rounded-xl px-3.5 py-2 text-base sm:text-xs text-white placeholder-white/35 focus:outline-none focus:border-indigo-400"
+                                    />
+                                    <div className="flex items-center gap-2">
+                                      <button
+                                        onClick={() =>
+                                          setDrillRevealed((prev) => ({
+                                            ...prev,
+                                            [drillKey]: !prev[drillKey],
+                                          }))
+                                        }
+                                        className="px-3.5 py-2 rounded-xl bg-emerald-600/30 hover:bg-emerald-600/50 border border-emerald-400/40 text-xs font-semibold text-emerald-200 cursor-pointer"
+                                      >
+                                        {isRevealed ? 'დამალვა' : '✓ პასუხის ნახვა'}
+                                      </button>
+                                      {userAttempt.trim() && (
+                                        <button
+                                          onClick={() =>
+                                            askDeepDive(
+                                              drillKey,
+                                              userAttempt,
+                                              drill.correct_answer,
+                                              drill.prompt_ka,
+                                              `დავალება იყო: "${drill.prompt_ka}". მე დავწერე: "${userAttempt}". სწორი პასუხია: "${drill.correct_answer}". შემიფასე ჩემი ვერსია — სწორია თუ არა და რატომ?`,
+                                            )
+                                          }
+                                          className="px-3 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-xs font-semibold text-white cursor-pointer"
+                                        >
+                                          🔍 AI შემოწმება
+                                        </button>
+                                      )}
+                                    </div>
+                                  </div>
+
+                                  {isRevealed && (
+                                    <div className="rounded-lg bg-black/40 border border-emerald-500/30 p-3 text-xs space-y-1">
+                                      <div className="text-emerald-300 font-semibold flex items-center justify-between">
+                                        <span>✅ სწორი პასუხი: {renderInteractiveText(drill.correct_answer)}</span>
+                                        <button
+                                          onClick={() => speakText(drill.correct_answer)}
+                                          className="px-1.5 py-0.5 rounded bg-white/10 text-white cursor-pointer"
+                                        >
+                                          🔊
+                                        </button>
+                                      </div>
+                                      {drill.explanation_ka && (
+                                        <p className="text-white/70">{drill.explanation_ka}</p>
+                                      )}
+                                    </div>
+                                  )}
+
+                                  {renderDeepDiveThread(
+                                    drillKey,
+                                    userAttempt || drill.prompt_ka,
+                                    drill.correct_answer,
+                                    drill.prompt_ka,
+                                  )}
+                                </div>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Saved Submissions List */}
+            <div className="space-y-4">
+              <h2 className="text-base sm:text-lg font-bold text-white flex items-center gap-2">
+                <span>📜</span>
+                <span>შენახული თემები ({submissions.length})</span>
+              </h2>
+
+              {loadingSubmissions && (
+                <div className="py-10 flex justify-center">
+                  <LoadingSpinner message="თემები იტვირთება..." />
+                </div>
+              )}
+
+              {!loadingSubmissions && submissions.length === 0 && (
+                <div className="rounded-2xl bg-white/[0.03] border border-white/10 p-10 text-center space-y-2">
+                  <p className="text-sm text-white/60">ჯერ შენახული თემები არ გაქვს.</p>
+                  <p className="text-xs text-white/40">
+                    როდესაც Free Writing-ში ტექსტს შეამოწმებ, ის ავტომატურად შეინახება აქ.
+                  </p>
+                </div>
+              )}
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {submissions.map((sub) => (
+                  <div
+                    key={sub.id}
+                    className="rounded-2xl bg-white/[0.03] border border-white/10 p-5 flex flex-col justify-between space-y-4 hover:border-purple-400/30 transition-all"
+                  >
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="px-2.5 py-0.5 rounded-full bg-purple-500/20 border border-purple-400/30 text-xs font-bold text-purple-200">
+                          {sub.cefr_level}
+                        </span>
+                        <span className="text-[11px] text-white/40">
+                          {sub.created_at
+                            ? new Date(sub.created_at).toLocaleDateString('ka-GE', {
+                                month: 'short',
+                                day: 'numeric',
+                                hour: '2-digit',
+                                minute: '2-digit',
+                              })
+                            : ''}
+                        </span>
+                      </div>
+
+                      {sub.topic && (
+                        <h3 className="text-sm font-semibold text-purple-200 line-clamp-1">
+                          📌 {sub.topic}
+                        </h3>
+                      )}
+
+                      <p className="text-xs sm:text-sm text-white/85 line-clamp-3 leading-relaxed">
+                        {sub.original_text}
+                      </p>
+
+                      {sub.overall_feedback && (
+                        <p className="text-xs text-white/50 line-clamp-2">
+                          💡 {sub.overall_feedback}
+                        </p>
+                      )}
+                    </div>
+
+                    <div className="flex items-center justify-between gap-2 pt-2 border-t border-white/10">
+                      <span className="text-[11px] text-white/40">
+                        🛠️ {sub.corrections.length} შესწორება
+                      </span>
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={() => handleLoadSubmissionIntoStudio(sub)}
+                          className="px-3.5 py-1.5 rounded-xl bg-purple-600/30 hover:bg-purple-600/50 border border-purple-400/40 text-xs font-semibold text-white cursor-pointer"
+                        >
+                          📖 სრულად გახსნა
+                        </button>
+                        <button
+                          onClick={() => handleDeleteSubmission(sub.id)}
+                          className="p-1.5 rounded-xl hover:bg-red-500/20 text-red-400 text-xs cursor-pointer"
+                          title="წაშლა"
+                        >
+                          🗑️
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                ))}
               </div>
             </div>
           </div>

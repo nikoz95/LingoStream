@@ -36,7 +36,10 @@ All frontend requests go through `frontend/src/lib/api.ts` (never call `fetch` d
 - `DELETE /api/v1/vocabulary/words/{word_id}` — Delete a saved word.
 
 ## 6. Writing & Speaking Studio (`/api/v1/writing` — `writing_router.py`)
-- `POST /api/v1/writing/evaluate` — Evaluate free writing (supports mixed Georgian/English input). Returns `corrected_text`, `natural_spoken_text`, `elevated_text`, `cefr_level`, `overall_feedback`, `speaking_connectors`, `corrections`, and `suggested_words`.
+- `POST /api/v1/writing/evaluate` — Evaluate free writing (supports mixed Georgian/English input) AND persist the submission in `writing_submissions`. Returns `submission_id`, `corrected_text`, `natural_spoken_text`, `elevated_text`, `cefr_level`, `overall_feedback`, `speaking_connectors`, `corrections`, and `suggested_words`.
+- `GET /api/v1/writing/submissions` — List the user's saved writing submissions (newest first).
+- `DELETE /api/v1/writing/submissions/{submission_id}` — Delete a saved writing submission.
+- `POST /api/v1/writing/analyze-patterns` — Analyze recurring error patterns across the user's saved writings and return diagnostic weak spots, golden rules, and interactive micro-drills.
 - `POST /api/v1/writing/chat` — Interactive roleplay/conversation turn. Returns AI `reply`, `reply_translation`, and `user_feedback` on the user's message.
 - `POST /api/v1/writing/explain` — Contextual Deep-Dive Tutor (`🔍 რატომ? / ჩაეძიე`). Explains grammatical rules, nuances, and contrast examples for a specific correction or phrase.
 - `POST /api/v1/writing/translate-word` — Look up a single word/phrase in context from the Writing Studio without requiring a `book_id`.

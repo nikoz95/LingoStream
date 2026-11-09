@@ -33,7 +33,7 @@ backend/
     │   └── writing_service.py                      # Writing evaluation, Roleplay chat, Deep-Dive grammar tutor
     ├── database/postgres/
     │   ├── session.py                              # AsyncSession & SQLAlchemy engine
-    │   ├── models.py                               # ORM tables: users, books, chapters, paragraphs, vocabulary_words
+    │   ├── models.py                               # ORM tables: users, books, chapters, paragraphs, vocabulary_words, writing_submissions
     │   ├── repositories.py                         # SQLAlchemy repository implementations
     │   ├── epub_parser.py                          # EPUB ingestion & chapter extraction
     │   └── pdf_parser.py                           # PyMuPDF (fitz) PDF word-position & text parser

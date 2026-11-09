@@ -1,11 +1,16 @@
 """Routes for the Writing & Speaking Studio."""
+import json
 import logging
 
 from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy import desc, select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from config.settings import settings
 from infrastructure.ai import translation_service as ts
 from infrastructure.ai import writing_service as ws
+from infrastructure.database.postgres.models import WritingSubmission
+from infrastructure.database.postgres.session import get_session
 from infrastructure.web.api.v1.dependencies import AuthenticatedUser, authenticate_request
 from infrastructure.web.api.v1.schemas.book_schemas import TranslateWordResponse
 from infrastructure.web.api.v1.schemas.writing_schemas import (
@@ -13,8 +18,11 @@ from infrastructure.web.api.v1.schemas.writing_schemas import (
     DeepDiveExplainResponse,
     EvaluateWritingRequest,
     EvaluateWritingResponse,
+    PatternAnalysisResponse,
     WritingChatRequest,
     WritingChatResponse,
+    WritingSubmissionItem,
+    WritingSubmissionListResponse,
     WritingTranslateWordRequest,
 )
 
@@ -23,16 +31,48 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
+def _orm_to_submission_item(row: WritingSubmission) -> WritingSubmissionItem:
+    """Convert a WritingSubmission ORM row into a WritingSubmissionItem schema."""
+    try:
+        corrections = json.loads(row.corrections_json or "[]")
+    except Exception:
+        corrections = []
+    try:
+        suggested_words = json.loads(row.suggested_words_json or "[]")
+    except Exception:
+        suggested_words = []
+    try:
+        speaking_connectors = json.loads(row.speaking_connectors_json or "[]")
+    except Exception:
+        speaking_connectors = []
+
+    return WritingSubmissionItem(
+        id=row.id,
+        topic=row.topic or "",
+        original_text=row.original_text,
+        corrected_text=row.corrected_text,
+        natural_spoken_text=row.natural_spoken_text,
+        elevated_text=row.elevated_text,
+        cefr_level=row.cefr_level or "B1",
+        overall_feedback=row.overall_feedback or "",
+        speaking_connectors=speaking_connectors,
+        corrections=corrections,
+        suggested_words=suggested_words,
+        created_at=row.created_at,
+    )
+
+
 @router.post(
     "/evaluate",
     response_model=EvaluateWritingResponse,
-    summary="Evaluate user writing with multi-level rewrites, corrections, and vocabulary",
+    summary="Evaluate user writing, persist submission, and return feedback",
 )
 async def evaluate_user_writing(
     body: EvaluateWritingRequest,
     auth: AuthenticatedUser = Depends(authenticate_request),
+    db: AsyncSession = Depends(get_session),
 ):
-    """Analyze free writing (including mixed Georgian/English) and return structured feedback."""
+    """Analyze free writing (including mixed Georgian/English), save it to DB, and return structured feedback."""
     try:
         result = await ws.evaluate_writing(
             text=body.text,
@@ -41,9 +81,117 @@ async def evaluate_user_writing(
             native_language=body.native_language,
             provider=body.provider,
         )
-        return EvaluateWritingResponse(**result)
+
+        submission = WritingSubmission(
+            user_id=auth.user.id,
+            topic=(body.topic or "").strip() or None,
+            original_text=body.text,
+            corrected_text=result.get("corrected_text", body.text),
+            natural_spoken_text=result.get("natural_spoken_text", body.text),
+            elevated_text=result.get("elevated_text", body.text),
+            cefr_level=result.get("cefr_level", "B1"),
+            overall_feedback=result.get("overall_feedback", ""),
+            corrections_json=json.dumps(result.get("corrections", []), ensure_ascii=False),
+            suggested_words_json=json.dumps(result.get("suggested_words", []), ensure_ascii=False),
+            speaking_connectors_json=json.dumps(result.get("speaking_connectors", []), ensure_ascii=False),
+        )
+        db.add(submission)
+        await db.commit()
+        await db.refresh(submission)
+
+        return EvaluateWritingResponse(submission_id=submission.id, **result)
     except ts.TranslationError as exc:
         logger.exception("Writing evaluation failed for user=%d", auth.user.id)
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+
+@router.get(
+    "/submissions",
+    response_model=WritingSubmissionListResponse,
+    summary="List saved writing submissions for the authenticated user",
+)
+async def list_writing_submissions(
+    auth: AuthenticatedUser = Depends(authenticate_request),
+    db: AsyncSession = Depends(get_session),
+):
+    """Return all saved writing submissions ordered newest first."""
+    stmt = (
+        select(WritingSubmission)
+        .where(WritingSubmission.user_id == auth.user.id)
+        .order_by(desc(WritingSubmission.created_at))
+        .limit(50)
+    )
+    res = await db.execute(stmt)
+    rows = res.scalars().all()
+    items = [_orm_to_submission_item(r) for r in rows]
+    return WritingSubmissionListResponse(submissions=items, total=len(items))
+
+
+@router.delete(
+    "/submissions/{submission_id}",
+    status_code=204,
+    summary="Delete a saved writing submission",
+)
+async def delete_writing_submission(
+    submission_id: int,
+    auth: AuthenticatedUser = Depends(authenticate_request),
+    db: AsyncSession = Depends(get_session),
+):
+    """Delete a specific writing submission belonging to the authenticated user."""
+    stmt = select(WritingSubmission).where(
+        WritingSubmission.id == submission_id,
+        WritingSubmission.user_id == auth.user.id,
+    )
+    res = await db.execute(stmt)
+    row = res.scalar_one_or_none()
+    if row is None:
+        raise HTTPException(status_code=404, detail="Submission not found")
+    await db.delete(row)
+    await db.commit()
+
+
+@router.post(
+    "/analyze-patterns",
+    response_model=PatternAnalysisResponse,
+    summary="Analyze common mistake patterns across user's saved writings and generate micro-drills",
+)
+async def analyze_user_writing_patterns(
+    auth: AuthenticatedUser = Depends(authenticate_request),
+    db: AsyncSession = Depends(get_session),
+):
+    """Inspect recent saved writing submissions to extract recurring weak spots, golden rules, and drills."""
+    stmt = (
+        select(WritingSubmission)
+        .where(WritingSubmission.user_id == auth.user.id)
+        .order_by(desc(WritingSubmission.created_at))
+        .limit(15)
+    )
+    res = await db.execute(stmt)
+    rows = res.scalars().all()
+    if not rows:
+        raise HTTPException(status_code=400, detail="ჯერ არ გაქვს შენახული თემები ანალიზისთვის.")
+
+    summary_payload = []
+    for r in reversed(rows):
+        try:
+            corrs = json.loads(r.corrections_json or "[]")
+        except Exception:
+            corrs = []
+        summary_payload.append(
+            {
+                "date": r.created_at.isoformat() if r.created_at else "",
+                "topic": r.topic or "",
+                "cefr_level": r.cefr_level,
+                "original_text": r.original_text[:600],
+                "corrections": corrs,
+            }
+        )
+
+    try:
+        result = await ws.analyze_writing_patterns(summary_payload)
+        return PatternAnalysisResponse(**result)
+    except ts.TranslationError as exc:
+        logger.exception("Writing pattern analysis failed for user=%d", auth.user.id)
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
 

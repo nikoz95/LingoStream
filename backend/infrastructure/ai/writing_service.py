@@ -328,3 +328,79 @@ async def explain_deep_dive(
     except Exception as exc:
         logger.error("explain_deep_dive failed: %s", exc)
         raise TranslationError(f"Deep dive explanation failed: {exc}") from exc
+
+
+PATTERN_ANALYSIS_SYSTEM_PROMPT = """You are an expert {target_language} diagnostic language coach analyzing a native {native_language} speaker's saved writing submissions and past mistakes.
+
+Your goal:
+1. Identify the top 2 to 4 RECURRING weak spots / error patterns across their essays (e.g., tense confusion, prepositions, articles, word order, literal translations from {native_language}, or limited connectors).
+2. Explain clearly in {native_language} WHY each problem happens and give a memorable "Golden Rule / Solution" ("ოქროს წესი") to fix it.
+3. For each weak spot, create 2 interactive "Micro-Fix Drills" where the user has to translate/write a sentence from {native_language} into {target_language} applying that exact rule.
+
+Return ONLY a valid raw JSON object (no markdown fences) with this exact structure:
+{{
+  "overall_summary": "<2-3 encouraging, insightful sentences in {native_language} summarizing their progress, strengths, and main habit patterns across these essays>",
+  "level_trend": "<e.g. 'B1' or 'B1 ➔ B2'>",
+  "weak_spots": [
+    {{
+      "category": "<Title of the recurring issue, e.g. 'Prepositions (in / on / at)' or 'Past Simple vs Present Perfect'>",
+      "frequency_label": "<Short label in {native_language}, e.g. 'მთავარი სუსტი წერტილი' or 'განმეორებადი შეცდომა'>",
+      "why_it_happens": "<Clear explanation in {native_language} of why this mistake happens>",
+      "golden_rule": "<Short, memorable solution/rule in {native_language} that fixes this mistake>",
+      "user_examples": [
+        {{
+          "wrong": "<Mistake from the user's essays>",
+          "right": "<Corrected {target_language} version>"
+        }}
+      ],
+      "drills": [
+        {{
+          "prompt_ka": "<A sentence in {native_language} (or a broken {target_language} sentence to fix) that tests this exact rule>",
+          "hint": "<Short hint in {target_language} or {native_language}>",
+          "correct_answer": "<The natural, grammatically correct {target_language} sentence>",
+          "explanation_ka": "<1-sentence explanation in {native_language} of why this answer is right>"
+        }}
+      ]
+    }}
+  ]
+}}
+
+Return ONLY raw JSON."""
+
+
+async def analyze_writing_patterns(
+    submissions_summary: List[Dict[str, Any]],
+    *,
+    target_language: str = "en",
+    native_language: str = "ka",
+    provider: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Analyze recurring mistakes across user's saved writings and generate targeted drills."""
+    tgt_name = _resolve_lang_name(target_language)
+    nat_name = _resolve_lang_name(native_language)
+
+    system_prompt = PATTERN_ANALYSIS_SYSTEM_PROMPT.format(
+        target_language=tgt_name,
+        native_language=nat_name,
+    )
+
+    user_payload = json.dumps(submissions_summary, ensure_ascii=False, indent=2)
+    messages = [
+        {"role": "system", "content": system_prompt},
+        {
+            "role": "user",
+            "content": f"Here are the user's recent writing submissions and corrections:\n{user_payload}",
+        },
+    ]
+
+    try:
+        data = await _call_llm_json(messages, provider=provider, temperature=0.3)
+        return {
+            "overall_summary": data.get("overall_summary", ""),
+            "level_trend": data.get("level_trend", "B1"),
+            "weak_spots": data.get("weak_spots", []),
+        }
+    except Exception as exc:
+        logger.error("analyze_writing_patterns failed: %s", exc)
+        raise TranslationError(f"Pattern analysis failed: {exc}") from exc
+
