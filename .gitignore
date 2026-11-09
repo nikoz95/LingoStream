@@ -3,13 +3,11 @@ __pycache__/
 *.py[cod]
 $*py.class
 *.egg-info/
-dist/
 build/
 .eggs/
 
 # Node
 node_modules/
-frontend/dist/
 
 # Environment
 .env
@@ -30,4 +28,3 @@ postgres_data/
 
 # Logs
 *.log
-.env

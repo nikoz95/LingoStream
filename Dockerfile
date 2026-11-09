@@ -1,11 +1,3 @@
-# ── Multi-stage Build: Frontend ─────────────────
-FROM node:22-alpine AS frontend-builder
-WORKDIR /app/frontend
-COPY frontend/package.json frontend/package-lock.json ./
-RUN npm ci
-COPY frontend/ ./
-RUN chmod -R +x node_modules/.bin && npx --no-install vite build
-
 # ── Main Runtime: Debian Bookworm with Python 3.11 ──
 FROM python:3.11-slim-bookworm
 
@@ -51,8 +43,8 @@ RUN pip install --no-cache-dir --upgrade pip && \
 # Copy Backend source code
 COPY backend/ .
 
-# Copy Frontend built static assets from frontend-builder stage
-COPY --from=frontend-builder /app/frontend/dist /var/www/html
+# Copy pre-built Frontend production assets directly into Nginx html directory
+COPY frontend/dist /var/www/html
 
 # Setup Nginx configuration
 COPY nginx.render.conf /etc/nginx/sites-available/default
