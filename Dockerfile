@@ -50,12 +50,14 @@ COPY frontend/dist /var/www/html
 # Setup Nginx configuration
 COPY nginx.render.conf /etc/nginx/sites-available/default
 
+# Configure PostgreSQL pg_hba.conf for internal local connections
+RUN sed -i 's/peer/trust/g' /etc/postgresql/15/main/pg_hba.conf && \
+    sed -i 's/scram-sha-256/trust/g' /etc/postgresql/15/main/pg_hba.conf && \
+    sed -i 's/md5/trust/g' /etc/postgresql/15/main/pg_hba.conf
+
 # Copy entrypoint script and set permissions
 COPY entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
-
-# Initialize PostgreSQL cluster directory
-RUN su - postgres -c "/usr/lib/postgresql/15/bin/initdb -D /var/lib/postgresql/15/main" || true
 
 EXPOSE 80 10000
 

@@ -9,7 +9,7 @@ redis-server --daemonize yes
 
 # 2. Setup and Start PostgreSQL
 echo "Starting PostgreSQL..."
-su - postgres -c "/usr/lib/postgresql/15/bin/pg_ctl -D /var/lib/postgresql/15/main -l /var/log/postgresql.log start" || true
+service postgresql start
 
 # Wait for Postgres to be ready
 until su - postgres -c "pg_isready" > /dev/null 2>&1; do
@@ -18,7 +18,8 @@ until su - postgres -c "pg_isready" > /dev/null 2>&1; do
 done
 
 # Create user & database if not exists
-su - postgres -c "psql -tc \"SELECT 1 FROM pg_database WHERE datname = 'lingostream'\" | grep -q 1 || psql -c \"CREATE USER \\\"user\\\" WITH PASSWORD 'password'; CREATE DATABASE lingostream OWNER \\\"user\\\"; GRANT ALL PRIVILEGES ON DATABASE lingostream TO \\\"user\\\";\"" || true
+su - postgres -c "psql -tc \"SELECT 1 FROM pg_roles WHERE rolname = 'user'\"" | grep -q 1 || su - postgres -c "psql -c \"CREATE USER \\\"user\\\" WITH PASSWORD 'password' SUPERUSER;\""
+su - postgres -c "psql -tc \"SELECT 1 FROM pg_database WHERE datname = 'lingostream'\"" | grep -q 1 || su - postgres -c "psql -c \"CREATE DATABASE lingostream OWNER \\\"user\\\";\""
 
 # 3. Start MinIO
 echo "Starting MinIO..."
