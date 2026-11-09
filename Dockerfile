@@ -31,8 +31,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     zlib1g-dev \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy official MinIO binary directly from the official MinIO container image
-COPY --from=minio/minio:latest /opt/bin/minio /usr/local/bin/minio
+# Copy official MinIO binary and client from elestio/minio
+COPY --from=elestio/minio:latest /usr/bin/minio /usr/local/bin/minio
+COPY --from=elestio/minio:latest /usr/bin/mc /usr/local/bin/mc
 
 # Install Python backend dependencies
 WORKDIR /app/backend

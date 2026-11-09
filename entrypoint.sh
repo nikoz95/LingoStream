@@ -25,8 +25,11 @@ echo "Starting MinIO..."
 mkdir -p /data/lingostream-books
 MINIO_ROOT_USER=minioadmin MINIO_ROOT_PASSWORD=minioadmin minio server /data --console-address ":9001" &
 
-# Wait for MinIO
-sleep 2
+# Wait for MinIO and ensure bucket exists
+sleep 3
+mc alias set local http://127.0.0.1:9000 minioadmin minioadmin || true
+mc mb local/lingostream-books || true
+mc anonymous set download local/lingostream-books || true
 
 # 4. Start Backend (FastAPI)
 echo "Starting FastAPI Backend..."
