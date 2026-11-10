@@ -657,5 +657,56 @@ export async function analyzeWritingPatterns(): Promise<PatternAnalysisResponse>
   });
 }
 
+// ── Discover & Read Hub API (Articles, Tech, Podcasts & Stories) ──
+
+export type DiscoverMode = 'original' | 'adapted' | 'podcast' | 'story';
+export type CefrLevel = 'A2' | 'B1' | 'B2' | 'C1';
+
+export interface DiscoverFeedItem {
+  id: string;
+  title: string;
+  summary: string;
+  category: string;
+  source_name: string;
+  author: string;
+  url?: string | null;
+  published_at?: string | null;
+  reading_time_minutes: number;
+  tags: string[];
+  item_type: 'article' | 'discussion' | 'story';
+  raw_content?: string | null;
+}
+
+export interface DiscoverFeedResponse {
+  category: string;
+  items: DiscoverFeedItem[];
+}
+
+export interface DiscoverImportRequest {
+  item_id?: string | null;
+  title: string;
+  summary?: string;
+  category?: string;
+  source_name?: string;
+  author?: string;
+  url?: string | null;
+  raw_content?: string | null;
+  mode: DiscoverMode;
+  cefr_level: CefrLevel;
+  include_original_chapter?: boolean;
+}
+
+export async function getDiscoverFeed(category: string): Promise<DiscoverFeedResponse> {
+  return request<DiscoverFeedResponse>(`/discover/feed?category=${encodeURIComponent(category)}`);
+}
+
+export async function importDiscoverItem(req: DiscoverImportRequest): Promise<RegisterBookResponse> {
+  return request<RegisterBookResponse>('/discover/import', {
+    method: 'POST',
+    body: JSON.stringify(req),
+  });
+}
+
+
 
 

@@ -9,10 +9,16 @@ Use this file to jump directly to the files implementing a feature without searc
 - **Backend Security/JWT:** `backend/infrastructure/security/`, `backend/infrastructure/web/api/v1/dependencies.py`
 - **ORM Model:** `UserORM` in `backend/infrastructure/database/postgres/models.py`
 
-## 2. Book Library & Upload (EPUB / PDF)
+## 2. Book Library, Upload & Discover Hub (`/library`)
 - **Frontend UI:** `frontend/src/pages/LibraryPage.tsx`
-- **Frontend API:** `frontend/src/lib/api.ts` (`listBooks`, `registerBook`, `deleteBook`, `getBookBlob`)
-- **Backend Routes:** `backend/infrastructure/web/api/v1/routes/book_router.py`
+  - **My Books Tab:** Upload and manage `.pdf` and `.epub` books.
+  - **Discover & Read Hub (`🌐 აღმოაჩინე მასალა`):** Browse live articles, discussions, and short stories across **Tech** (`AI & LLMs`, `.NET & C#`, `Python`, `System Design`), **General** (`World & News`, `Psychology & Habits`, `Science & Space`, `Culture & Life`), **Spoken** (`🎙️ Podcasts & Discussions`), and **Fiction** (`📖 მოთხრობები / Short Stories`), plus custom topic creation.
+  - **Reading Format & Level Selector Modal:** Open any item in the Reader as **Original**, **Adapted to Level (`A2`/`B1`/`B2`/`C1`)**, **2-Host Podcast Dialogue**, or **Modern Short Story** (with optional Chapter 2 containing the original text).
+- **Frontend API:** `frontend/src/lib/api.ts` (`listBooks`, `registerBook`, `deleteBook`, `getBookBlob`, `getDiscoverFeed`, `importDiscoverItem`)
+- **Backend Routes:**
+  - Books: `backend/infrastructure/web/api/v1/routes/book_router.py`
+  - Discover & Smart Import: `backend/infrastructure/web/api/v1/routes/discover_router.py`
+- **Backend Discover & EPUB Service:** `backend/infrastructure/ai/discover_service.py`
 - **Parsers:**
   - EPUB: `backend/infrastructure/database/postgres/epub_parser.py`
   - PDF: `backend/infrastructure/database/postgres/pdf_parser.py`

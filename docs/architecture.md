@@ -30,7 +30,8 @@ backend/
 └── infrastructure/
     ├── ai/
     │   ├── translation_service.py                  # Passage & word translation (Gemini/DeepSeek/OpenAI/Local)
-    │   └── writing_service.py                      # Writing evaluation, Roleplay chat, Deep-Dive grammar tutor
+    │   ├── writing_service.py                      # Writing evaluation, Roleplay chat, Deep-Dive grammar tutor
+    │   └── discover_service.py                     # Multi-source feed aggregation, CEFR adaptation, Podcast dialogue & Story EPUB builder
     ├── database/postgres/
     │   ├── session.py                              # AsyncSession & SQLAlchemy engine
     │   ├── models.py                               # ORM tables: users, books, chapters, paragraphs, vocabulary_words, writing_submissions
@@ -44,14 +45,16 @@ backend/
         ├── schemas/
         │   ├── auth_schemas.py                     # Auth Pydantic models
         │   ├── book_schemas.py                     # Book, Chapter, Translation, Vocabulary Pydantic models
-        │   └── writing_schemas.py                  # Writing & Speaking Studio Pydantic models
+        │   ├── writing_schemas.py                  # Writing & Speaking Studio Pydantic models
+        │   └── discover_schemas.py                 # Discover feed & import Pydantic models
         └── routes/
             ├── auth_router.py                      # /api/v1/auth/*
             ├── book_router.py                      # /api/v1/books/*
             ├── translation_router.py               # /api/v1/books/{id}/translate*
             ├── page_router.py                      # /api/v1/pages/* (PDF word bounding boxes)
             ├── vocabulary_router.py                # /api/v1/vocabulary/*
-            └── writing_router.py                   # /api/v1/writing/*
+            ├── writing_router.py                   # /api/v1/writing/*
+            └── discover_router.py                  # /api/v1/discover/* (Articles, Tech, Podcasts & Stories)
 ```
 
 ---

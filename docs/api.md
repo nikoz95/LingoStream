@@ -43,3 +43,7 @@ All frontend requests go through `frontend/src/lib/api.ts` (never call `fetch` d
 - `POST /api/v1/writing/chat` — Interactive roleplay/conversation turn. Returns AI `reply`, `reply_translation`, and `user_feedback` on the user's message.
 - `POST /api/v1/writing/explain` — Contextual Deep-Dive Tutor (`🔍 რატომ? / ჩაეძიე`). Explains grammatical rules, nuances, and contrast examples for a specific correction or phrase.
 - `POST /api/v1/writing/translate-word` — Look up a single word/phrase in context from the Writing Studio without requiring a `book_id`.
+
+## 7. Content Discovery, Level Adaptation, Podcasts & Stories (`/api/v1/discover` — `discover_router.py`)
+- `GET /api/v1/discover/feed?category=...` — Fetch live articles, community discussions, or modern short story prompts across categories (`ai`, `dotnet`, `python`, `architecture`, `world`, `psychology`, `science`, `culture`, `podcasts`, `stories`).
+- `POST /api/v1/discover/import` — Resolve full content for a feed item or custom topic, optionally transform it via AI (`mode`: `original` | `adapted` | `podcast` | `story`, `cefr_level`: `A2` | `B1` | `B2` | `C1`), package it into a reflowable `.epub` in S3/MinIO, and register it in the user's library for immediate reading in `ReaderPage.tsx`.
