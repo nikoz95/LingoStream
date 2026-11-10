@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useLanguage } from '../lib/i18n';
 import { useSettings } from '../lib/settings';
-import LanguageToggle from '../components/LanguageToggle';
+import AppLayout from '../components/AppLayout';
 import SettingsModal from '../components/SettingsModal';
 import {
   evaluateWriting,
@@ -732,63 +732,8 @@ export default function WritingPage() {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-gray-950 via-purple-950/60 to-gray-950 text-white pb-20 sm:pb-8">
-      {/* Header */}
-      <header className="glass sticky top-0 z-40 px-3 sm:px-6 lg:px-8 py-2.5 min-h-14 border-b border-white/10 flex items-center justify-between gap-2">
-        <div className="flex items-center gap-2 sm:gap-3 min-w-0">
-          <button
-            onClick={() => navigate('/library')}
-            className="p-2 rounded-xl hover:bg-white/10 transition-colors cursor-pointer shrink-0"
-            title={t.back}
-          >
-            <svg className="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
-            </svg>
-          </button>
-          <div className="min-w-0">
-            <h1 className="text-sm sm:text-lg lg:text-xl font-bold bg-gradient-to-r from-purple-400 via-pink-400 to-indigo-400 bg-clip-text text-transparent truncate">
-              ✍️ {t.writingTitle}
-            </h1>
-            <p className="text-[11px] text-white/50 hidden md:block truncate">
-              {t.writingSubtitle}
-            </p>
-          </div>
-        </div>
-
-        <div className="flex items-center gap-1.5 sm:gap-2.5 shrink-0">
-          <LanguageToggle />
-          <button
-            onClick={settings.openSettings}
-            className="p-1.5 sm:px-3 sm:py-2 text-xs sm:text-sm rounded-xl border border-white/15 hover:bg-white/10 transition-all cursor-pointer flex items-center gap-1 text-white"
-            title={t.navSettings}
-          >
-            <span>⚙️</span>
-            <span className="hidden md:inline">{t.navSettings}</span>
-          </button>
-          <button
-            onClick={() => navigate('/library')}
-            className="px-2.5 sm:px-3.5 py-1.5 sm:py-2 text-xs sm:text-sm rounded-xl border border-white/15 hover:bg-white/10 transition-all cursor-pointer"
-          >
-            📚 <span className="hidden sm:inline">{t.navLibrary}</span>
-          </button>
-          <button
-            onClick={() => navigate('/vocabulary')}
-            className="px-2.5 sm:px-3.5 py-1.5 sm:py-2 text-xs sm:text-sm rounded-xl border border-purple-400/30 bg-purple-500/10 hover:bg-purple-500/20 transition-all cursor-pointer flex items-center gap-1"
-          >
-            <span>🗂️</span>
-            <span className="hidden xs:inline sm:inline">{t.navVocabulary}</span>
-          </button>
-          <button
-            onClick={handleLogout}
-            className="px-2.5 sm:px-3.5 py-1.5 sm:py-2 text-xs sm:text-sm rounded-xl border border-white/15 hover:bg-white/10 transition-colors cursor-pointer"
-          >
-            <span className="hidden sm:inline">{t.navSignOut}</span>
-            <span className="sm:hidden">🚪</span>
-          </button>
-        </div>
-      </header>
-
-      <main className="max-w-6xl mx-auto px-3 sm:px-6 lg:px-8 py-4 sm:py-6 space-y-4 sm:space-y-6">
+    <AppLayout title={t.writingTitle}>
+        <div className="space-y-6">
         {/* Mode Switcher Tabs */}
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <div className="grid grid-cols-3 sm:inline-flex p-1 rounded-2xl bg-white/5 border border-white/10 w-full sm:w-auto">
@@ -796,7 +741,7 @@ export default function WritingPage() {
               onClick={() => setMode('free')}
               className={`px-2.5 sm:px-5 py-2.5 rounded-xl text-xs sm:text-sm font-semibold transition-all cursor-pointer flex items-center justify-center gap-1.5 sm:gap-2 ${
                 mode === 'free'
-                  ? 'bg-gradient-to-r from-purple-600 to-indigo-600 text-white shadow-lg shadow-purple-600/30'
+                  ? 'bg-[var(--app-accent)] text-white shadow-xs font-semibold'
                   : 'text-white/60 hover:text-white'
               }`}
             >
@@ -812,7 +757,7 @@ export default function WritingPage() {
               }}
               className={`px-2.5 sm:px-5 py-2.5 rounded-xl text-xs sm:text-sm font-semibold transition-all cursor-pointer flex items-center justify-center gap-1.5 sm:gap-2 ${
                 mode === 'chat'
-                  ? 'bg-gradient-to-r from-purple-600 to-indigo-600 text-white shadow-lg shadow-purple-600/30'
+                  ? 'bg-[var(--app-accent)] text-white shadow-xs font-semibold'
                   : 'text-white/60 hover:text-white'
               }`}
             >
@@ -826,7 +771,7 @@ export default function WritingPage() {
               }}
               className={`px-2.5 sm:px-5 py-2.5 rounded-xl text-xs sm:text-sm font-semibold transition-all cursor-pointer flex items-center justify-center gap-1.5 sm:gap-2 ${
                 mode === 'history'
-                  ? 'bg-gradient-to-r from-purple-600 to-indigo-600 text-white shadow-lg shadow-purple-600/30'
+                  ? 'bg-[var(--app-accent)] text-white shadow-xs font-semibold'
                   : 'text-white/60 hover:text-white'
               }`}
             >
@@ -963,7 +908,7 @@ export default function WritingPage() {
                 <button
                   onClick={handleEvaluateWriting}
                   disabled={evaluating || !text.trim()}
-                  className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 disabled:opacity-40 text-sm font-semibold text-white shadow-lg shadow-purple-600/30 transition-all cursor-pointer flex items-center justify-center gap-2"
+                  className="px-5 py-2.5 rounded-xl bg-[var(--app-accent)] hover:bg-[var(--app-accent-hover)] disabled:opacity-40 text-sm font-semibold text-white shadow-lg shadow-purple-600/30 transition-all cursor-pointer flex items-center justify-center gap-2"
                 >
                   <span>✨</span>
                   <span>{evaluating ? t.writingChecking : t.writingCheckBtn}</span>
@@ -1603,7 +1548,7 @@ export default function WritingPage() {
                 <button
                   onClick={handleSendChatMessage}
                   disabled={chatLoading || !chatInput.trim()}
-                  className="px-4 sm:px-5 py-3 rounded-xl bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 disabled:opacity-40 text-xs sm:text-sm font-semibold text-white cursor-pointer shrink-0"
+                  className="px-4 sm:px-5 py-3 rounded-xl bg-[var(--app-accent)] hover:bg-[var(--app-accent-hover)] disabled:opacity-40 text-xs sm:text-sm font-semibold text-white cursor-pointer shrink-0"
                 >
                   {t.writingChatSend}
                 </button>
@@ -1924,12 +1869,11 @@ export default function WritingPage() {
             </div>
           </div>
         )}
-      </main>
-      {/* Global Settings Modal */}
+      </div>
       <SettingsModal
         isOpen={settings.isSettingsOpen}
         onClose={settings.closeSettings}
       />
-    </div>
+    </AppLayout>
   );
 }

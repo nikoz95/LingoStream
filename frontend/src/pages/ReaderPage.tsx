@@ -1,6 +1,8 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useAuth } from '../lib/auth';
+import { useLanguage } from '../lib/i18n';
+import { useSettings } from '../lib/settings';
 import { saveVocabularyWord, getBookBlob } from '../lib/api';
 import { usePdfDocument } from '../hooks/usePdfDocument';
 import { useContainerWidth } from '../hooks/useContainerWidth';
@@ -37,6 +39,8 @@ export default function ReaderPage() {
   const { bookId } = useParams<{ bookId: string }>();
   const navigate = useNavigate();
   const { logout } = useAuth();
+  const { t } = useLanguage();
+  const settings = useSettings();
 
   // ── Core refs ──
   const scrollContainerRef = useRef<HTMLDivElement>(null);
@@ -67,7 +71,7 @@ export default function ReaderPage() {
   const [epubFraction, setEpubFraction] = useState(0);
   const [epubPageInfo, setEpubPageInfo] = useState({ current: 1, total: 100 });
 
-  // Typography & Layout Preferences (persisted in localStorage)
+  // Typography & Layout Preferences (synced with settings and persisted in localStorage)
   const [epubLayout, setEpubLayout] = useState<EpubLayoutMode>(
     () => (localStorage.getItem('ls_epub_layout') as EpubLayoutMode) || 'paginated-single',
   );
@@ -75,10 +79,10 @@ export default function ReaderPage() {
     () => (localStorage.getItem('ls_epub_theme') as EpubTheme) || 'night',
   );
   const [readerFontSize, setReaderFontSize] = useState(
-    () => Number(localStorage.getItem('ls_font_size')) || 110,
+    () => Number(localStorage.getItem('ls_reader_font_size')) || Number(localStorage.getItem('ls_font_size')) || settings.readerFontSize || 110,
   );
   const [fontFamily, setFontFamily] = useState<EpubFontFamily>(
-    () => (localStorage.getItem('ls_font_family') as EpubFontFamily) || 'literata',
+    () => (localStorage.getItem('ls_reader_font_family') as EpubFontFamily) || (localStorage.getItem('ls_font_family') as EpubFontFamily) || settings.readerFontFamily || 'literata',
   );
   const [lineHeight, setLineHeight] = useState(
     () => Number(localStorage.getItem('ls_line_height')) || 1.75,
@@ -88,7 +92,22 @@ export default function ReaderPage() {
   );
 
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
-  const [targetLang, setTargetLang] = useState(() => localStorage.getItem('ls_target_lang') || 'ka');
+  const [targetLang, setTargetLang] = useState(
+    () => localStorage.getItem('ls_target_lang') || settings.targetLang || 'ka',
+  );
+
+  // Sync state if settings change elsewhere
+  useEffect(() => {
+    if (settings.readerFontSize && settings.readerFontSize !== readerFontSize) {
+      setReaderFontSize(settings.readerFontSize);
+    }
+  }, [settings.readerFontSize]);
+
+  useEffect(() => {
+    if (settings.readerFontFamily && settings.readerFontFamily !== fontFamily) {
+      setFontFamily(settings.readerFontFamily);
+    }
+  }, [settings.readerFontFamily]);
 
   // Handlers for persisting EPUB reading options
   const handleEpubLayoutChange = useCallback((layout: EpubLayoutMode) => {
@@ -104,12 +123,16 @@ export default function ReaderPage() {
   const handleFontSizeChange = useCallback((size: number) => {
     setReaderFontSize(size);
     localStorage.setItem('ls_font_size', String(size));
-  }, []);
+    localStorage.setItem('ls_reader_font_size', String(size));
+    settings.setReaderFontSize(size);
+  }, [settings]);
 
   const handleFontFamilyChange = useCallback((family: EpubFontFamily) => {
     setFontFamily(family);
     localStorage.setItem('ls_font_family', family);
-  }, []);
+    localStorage.setItem('ls_reader_font_family', family);
+    settings.setReaderFontFamily(family);
+  }, [settings]);
 
   const handleLineHeightChange = useCallback((lh: number) => {
     setLineHeight(lh);
@@ -124,7 +147,8 @@ export default function ReaderPage() {
   const handleTargetLangChange = useCallback((lang: string) => {
     setTargetLang(lang);
     localStorage.setItem('ls_target_lang', lang);
-  }, []);
+    settings.setTargetLang(lang);
+  }, [settings]);
 
   // Load EPUB blob from backend (MinIO)
   useEffect(() => {
@@ -812,7 +836,7 @@ export default function ReaderPage() {
   if (!isEpubMode && pdfLoading && !pdfDocument) {
     return (
       <div className={`min-h-screen flex items-center justify-center ${theme === 'sepia' ? 'theme-sepia' : 'theme-night'}`}>
-        <LoadingSpinner message="Loading PDF..." />
+        <LoadingSpinner message={t.readerLoadingPdf} />
       </div>
     );
   }
@@ -826,7 +850,7 @@ export default function ReaderPage() {
             onClick={() => navigate('/library')}
             className="px-4 py-2 rounded-xl bg-white/10 hover:bg-white/20 text-white font-medium transition-colors"
           >
-            Back to Library
+            {t.readerBackToLibrary}
           </button>
         </div>
       </div>
@@ -836,7 +860,7 @@ export default function ReaderPage() {
   return (
     <div className={`h-[100dvh] overflow-hidden flex flex-col ${theme === 'sepia' ? 'theme-sepia' : 'theme-night'}`}>
       <ReaderHeader
-        title={pdfBook?.title || 'E-Reader'}
+        title={pdfBook?.title || t.readerDefaultTitle}
         chapterTitle={epubChapterTitle}
         currentPage={isEpubMode ? epubPageInfo.current : currentPage}
         numPages={isEpubMode ? epubPageInfo.total : numPages}
@@ -899,7 +923,7 @@ export default function ReaderPage() {
             <div className="w-full h-full flex-1 relative">
               {epubLoading && !epubBlob ? (
                 <div className="w-full h-full flex items-center justify-center bg-[#141518]">
-                  <LoadingSpinner message="წიგნი მზადდება EPUB ფორმატში..." light />
+                  <LoadingSpinner message={t.readerPreparingEpub} light />
                 </div>
               ) : (
                 <EpubViewer
@@ -924,7 +948,7 @@ export default function ReaderPage() {
                   <button
                     onClick={handlePrevPage}
                     className="fixed left-4 top-1/2 -translate-y-1/2 z-20 p-2.5 rounded-full bg-black/25 hover:bg-purple-600/80 text-white/50 hover:text-white border border-white/10 backdrop-blur-md transition-all hover:scale-110 shadow-lg"
-                    title="წინა გვერდი (←)"
+                    title={t.readerPrevPage}
                   >
                     <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
@@ -933,7 +957,7 @@ export default function ReaderPage() {
                   <button
                     onClick={handleNextPage}
                     className="fixed right-4 top-1/2 -translate-y-1/2 z-20 p-2.5 rounded-full bg-black/25 hover:bg-purple-600/80 text-white/50 hover:text-white border border-white/10 backdrop-blur-md transition-all hover:scale-110 shadow-lg"
-                    title="შემდეგი გვერდი (→)"
+                    title={t.readerNextPage}
                   >
                     <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
@@ -970,7 +994,7 @@ export default function ReaderPage() {
                 ) : (
                   <div className="flex items-center justify-center h-full min-h-[60vh]">
                     <div className="text-center">
-                      <p className="opacity-50 mb-4">No pages loaded</p>
+                      <p className="opacity-50 mb-4">{t.readerNoPages}</p>
                     </div>
                   </div>
                 )}
@@ -1019,7 +1043,7 @@ export default function ReaderPage() {
                 onClick={handlePrevPage}
                 disabled={!isEpubMode && (!numPages || currentPage <= 1)}
                 className="p-1 rounded-lg hover:bg-white/15 disabled:opacity-30 transition-colors"
-                title="წინა გვერდი (←)"
+                title={t.readerPrevPage}
               >
                 <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
@@ -1029,7 +1053,7 @@ export default function ReaderPage() {
                 onClick={handleNextPage}
                 disabled={!isEpubMode && (!numPages || currentPage >= numPages)}
                 className="p-1 rounded-lg hover:bg-white/15 disabled:opacity-30 transition-colors"
-                title="შემდეგი გვერდი (→)"
+                title={t.readerNextPage}
               >
                 <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
@@ -1066,7 +1090,7 @@ export default function ReaderPage() {
                 left: `${translateIconPos.left}px`,
                 transform: 'translate(-50%, -50%)',
               }}
-              title="თარგმნა"
+              title={t.readerTranslateBtn}
             >
               <svg className="w-3.5 h-3.5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path
@@ -1076,7 +1100,7 @@ export default function ReaderPage() {
                   d="M3 5h12M9 3v2m1.048 9.5A18.022 18.022 0 016.412 9m6.088 9h7M11 21l5-10 5 10M12.751 5C11.783 10.77 8.07 15.61 3 18.129"
                 />
               </svg>
-              <span>თარგმნა</span>
+              <span>{t.readerTranslateBtn}</span>
             </button>
           )}
 
@@ -1088,7 +1112,7 @@ export default function ReaderPage() {
             >
               <div className="min-w-0 flex-1">
                 <span className="text-[10px] uppercase tracking-wider text-purple-300/80 font-semibold block">
-                  {activeSelectedText.split(/\s+/).length > 1 ? 'მონიშნული წინადადება' : 'მონიშნული სიტყვა'}
+                  {activeSelectedText.split(/\s+/).length > 1 ? t.readerSelectedSentence : t.readerSelectedWord}
                 </span>
                 <p className="text-xs sm:text-sm text-white font-medium truncate">
                   "{activeSelectedText}"
@@ -1107,12 +1131,12 @@ export default function ReaderPage() {
                       d="M3 5h12M9 3v2m1.048 9.5A18.022 18.022 0 016.412 9m6.088 9h7M11 21l5-10 5 10M12.751 5C11.783 10.77 8.07 15.61 3 18.129"
                     />
                   </svg>
-                  <span>თარგმნა</span>
+                  <span>{t.readerTranslateBtn}</span>
                 </button>
                 <button
                   onClick={handleCloseTranslation}
                   className="p-2 rounded-xl bg-white/5 active:bg-white/15 text-white/60"
-                  title="დახურვა"
+                  title={t.close}
                 >
                   <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
@@ -1155,11 +1179,12 @@ export default function ReaderPage() {
                   <div className="w-10 h-1 rounded-full bg-white/20 mb-2" />
                   <div className="w-full flex items-center justify-between">
                     <span className="text-xs font-bold opacity-80 uppercase tracking-wider text-purple-300">
-                      {wordResult || translationResult ? 'თარგმანი' : 'მონიშნული ტექსტი'}
+                      {wordResult || translationResult ? t.readerTranslation : t.readerSelectedText}
                     </span>
                     <button
                       onClick={handleCloseTranslation}
                       className="p-1.5 rounded-xl bg-white/5 hover:bg-white/15 transition-colors"
+                      title={t.close}
                     >
                       <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
@@ -1193,9 +1218,12 @@ export default function ReaderPage() {
       <SettingsModal
         isOpen={isSettingsOpen}
         onClose={() => setIsSettingsOpen(false)}
-        provider={provider}
-        onProviderChange={setProvider}
-        targetLang={targetLang}
+        provider={provider || settings.translationEngine}
+        onProviderChange={(p) => {
+          setProvider(p);
+          settings.setTranslationEngine(p);
+        }}
+        targetLang={targetLang || settings.targetLang}
         onTargetLangChange={handleTargetLangChange}
         fontSize={readerFontSize}
         onFontSizeChange={handleFontSizeChange}

@@ -1,4 +1,5 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
+import { useLanguage } from '../lib/i18n';
 import type { EpubFontFamily, EpubLayoutMode, EpubTheme } from '../lib/reader/EpubEngine';
 import type { TocItem } from '../lib/reader/types';
 
@@ -75,6 +76,7 @@ export default function ReaderHeader({
   onToggleSearch,
   onOpenSettings,
 }: ReaderHeaderProps) {
+  const { t } = useLanguage();
   const [pageInput, setPageInput] = useState('');
   const [showAppearance, setShowAppearance] = useState(false);
   const [showToc, setShowToc] = useState(false);
@@ -137,7 +139,7 @@ export default function ReaderHeader({
           <button
             onClick={onBack}
             className="p-1.5 rounded-xl hover:bg-white/10 transition-colors flex-shrink-0"
-            title="ბიბლიოთეკაში დაბრუნება"
+            title={t.readerBackToLibrary}
           >
             <svg className={`${isMobile ? 'w-4 h-4' : 'w-5 h-5'}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
@@ -155,7 +157,7 @@ export default function ReaderHeader({
                 className={`p-1.5 rounded-xl transition-colors flex items-center gap-1 text-xs ${
                   showToc ? 'bg-purple-600/30 text-purple-300' : 'hover:bg-white/10 text-white/80'
                 }`}
-                title="სარჩევი (Table of Contents)"
+                title={t.readerTocTitle}
               >
                 <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h10" />
@@ -167,7 +169,7 @@ export default function ReaderHeader({
                   <div className="fixed inset-0 z-40" onClick={() => setShowToc(false)} />
                   <div className="absolute left-0 top-10 z-50 w-72 max-h-96 overflow-y-auto bg-gray-900/95 backdrop-blur-xl border border-white/15 rounded-2xl shadow-2xl p-2 text-white">
                     <div className="px-3 py-2 text-[11px] font-semibold uppercase tracking-wider text-white/40 border-b border-white/10">
-                      სარჩევი (Chapters)
+                      {t.readerTocHeader}
                     </div>
                     <div className="py-1 space-y-0.5">
                       {toc.map((item) => (
@@ -193,7 +195,7 @@ export default function ReaderHeader({
 
           <div className="flex flex-col min-w-0">
             <h1 className={`font-semibold truncate ${isMobile ? 'text-xs max-w-[90px]' : 'text-sm max-w-[180px] sm:max-w-xs'}`}>
-              {title || 'Reading'}
+              {title || t.readerDefaultTitle}
             </h1>
             {isEpubMode && chapterTitle && !isMobile && (
               <span className="text-[10px] text-purple-300/80 truncate max-w-[220px]">
@@ -217,12 +219,12 @@ export default function ReaderHeader({
                   ? 'bg-purple-600 text-white shadow-sm'
                   : 'text-white/60 hover:text-white hover:bg-white/5'
               }`}
-              title="1 გვერდი (გადაფურცვლა)"
+              title={t.readerLayout1PageTooltip}
             >
               <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 21h10a2 2 0 002-2V5a2 2 0 00-2-2H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
               </svg>
-              <span>1 გვერდი</span>
+              <span>{t.readerLayout1Page}</span>
             </button>
 
             <button
@@ -232,12 +234,12 @@ export default function ReaderHeader({
                   ? 'bg-purple-600 text-white shadow-sm'
                   : 'text-white/60 hover:text-white hover:bg-white/5'
               }`}
-              title="2 გვერდი (გაშლილი წიგნი)"
+              title={t.readerLayout2PagesTooltip}
             >
               <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
               </svg>
-              <span>2 გვერდი</span>
+              <span>{t.readerLayout2Pages}</span>
             </button>
 
             <button
@@ -247,12 +249,12 @@ export default function ReaderHeader({
                   ? 'bg-purple-600 text-white shadow-sm'
                   : 'text-white/60 hover:text-white hover:bg-white/5'
               }`}
-              title="უწყვეტი სქროლი (Scroll)"
+              title={t.readerLayoutScrollTooltip}
             >
               <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
               </svg>
-              <span>სქროლი</span>
+              <span>{t.readerLayoutScroll}</span>
             </button>
           </div>
         )}
@@ -272,7 +274,7 @@ export default function ReaderHeader({
                     ? 'bg-purple-600 text-white border-purple-500'
                     : 'bg-white/5 hover:bg-white/10 text-white/90 border-white/10'
                 }`}
-                title="კითხვის პარამეტრები (შრიფტი, ფერი, ზომა)"
+                title={t.readerAppearanceTitle}
               >
                 <span className="font-serif text-sm leading-none">Aa</span>
               </button>
@@ -285,7 +287,7 @@ export default function ReaderHeader({
                     {isMobile && onEpubLayoutChange && (
                       <div className="space-y-1.5">
                         <label className="text-[11px] font-semibold uppercase tracking-wider text-white/50">
-                          განლაგება (Layout)
+                          {t.readerLayoutLabel}
                         </label>
                         <div className="grid grid-cols-2 gap-1.5">
                           <button
@@ -296,7 +298,7 @@ export default function ReaderHeader({
                                 : 'border-white/10 bg-white/5 text-white/70'
                             }`}
                           >
-                            გვერდები
+                            {t.readerLayoutPages}
                           </button>
                           <button
                             onClick={() => onEpubLayoutChange('scrolled')}
@@ -306,7 +308,7 @@ export default function ReaderHeader({
                                 : 'border-white/10 bg-white/5 text-white/70'
                             }`}
                           >
-                            სქროლი
+                            {t.readerLayoutScroll}
                           </button>
                         </div>
                       </div>
@@ -315,23 +317,23 @@ export default function ReaderHeader({
                     {/* Theme Selector */}
                     <div className="space-y-1.5">
                       <label className="text-[11px] font-semibold uppercase tracking-wider text-white/50">
-                        ფონის ფერი (Theme)
+                        {t.readerThemeLabel}
                       </label>
                       <div className="grid grid-cols-3 gap-2">
                         {[
-                          { id: 'night' as Theme, label: 'ღამე', bg: '#141518', fg: '#E2E4E9' },
-                          { id: 'sepia' as Theme, label: 'სეპია', bg: '#F4ECD8', fg: '#3B2E1E' },
-                          { id: 'light' as Theme, label: 'დღე', bg: '#FAF9F5', fg: '#1F2937' },
-                        ].map((t) => (
+                          { id: 'night' as Theme, label: t.readerThemeNight, bg: '#141518', fg: '#E2E4E9' },
+                          { id: 'sepia' as Theme, label: t.readerThemeSepia, bg: '#F4ECD8', fg: '#3B2E1E' },
+                          { id: 'light' as Theme, label: t.readerThemeLight, bg: '#FAF9F5', fg: '#1F2937' },
+                        ].map((th) => (
                           <button
-                            key={t.id}
-                            onClick={() => onThemeChange?.(t.id)}
-                            style={{ backgroundColor: t.bg, color: t.fg }}
+                            key={th.id}
+                            onClick={() => onThemeChange?.(th.id)}
+                            style={{ backgroundColor: th.bg, color: th.fg }}
                             className={`py-2 px-3 rounded-xl text-xs font-semibold border-2 transition-all ${
-                              theme === t.id ? 'border-purple-500 scale-[1.02] shadow-lg' : 'border-white/15 opacity-80 hover:opacity-100'
+                              theme === th.id ? 'border-purple-500 scale-[1.02] shadow-lg' : 'border-white/15 opacity-80 hover:opacity-100'
                             }`}
                           >
-                            {t.label}
+                            {th.label}
                           </button>
                         ))}
                       </div>
@@ -340,7 +342,7 @@ export default function ReaderHeader({
                     {/* Font Family */}
                     <div className="space-y-1.5">
                       <label className="text-[11px] font-semibold uppercase tracking-wider text-white/50">
-                        შრიფტი (Font)
+                        {t.readerFontLabel}
                       </label>
                       <div className="grid grid-cols-2 gap-1.5">
                         {[
@@ -368,7 +370,7 @@ export default function ReaderHeader({
                     <div className="space-y-1.5">
                       <div className="flex justify-between items-center">
                         <label className="text-[11px] font-semibold uppercase tracking-wider text-white/50">
-                          შრიფტის ზომა
+                          {t.readerFontSize}
                         </label>
                         <span className="text-xs text-purple-400 font-semibold">{fontSize}%</span>
                       </div>
@@ -400,13 +402,13 @@ export default function ReaderHeader({
                     {/* Line Spacing */}
                     <div className="space-y-1.5">
                       <label className="text-[11px] font-semibold uppercase tracking-wider text-white/50">
-                        სტრიქონებს შორის დაშორება
+                        {t.readerLineSpacingLabel}
                       </label>
                       <div className="grid grid-cols-3 gap-1.5">
                         {[
-                          { val: 1.45, label: 'მჭიდრო' },
-                          { val: 1.75, label: 'სტანდარტული' },
-                          { val: 2.05, label: 'ფართო' },
+                          { val: 1.45, label: t.readerLineSpacingTight },
+                          { val: 1.75, label: t.readerLineSpacingNormal },
+                          { val: 2.05, label: t.readerLineSpacingWide },
                         ].map((lh) => (
                           <button
                             key={lh.val}
@@ -427,13 +429,13 @@ export default function ReaderHeader({
                     {!isMobile && (
                       <div className="space-y-1.5">
                         <label className="text-[11px] font-semibold uppercase tracking-wider text-white/50">
-                          ტექსტის სიგანე
+                          {t.readerTextWidthLabel}
                         </label>
                         <div className="grid grid-cols-3 gap-1.5">
                           {[
-                            { val: 620, label: 'ვიწრო' },
-                            { val: 780, label: 'საშუალო' },
-                            { val: 980, label: 'ფართო' },
+                            { val: 620, label: t.readerTextWidthNarrow },
+                            { val: 780, label: t.readerTextWidthMedium },
+                            { val: 980, label: t.readerTextWidthWide },
                           ].map((pw) => (
                             <button
                               key={pw.val}
@@ -465,7 +467,7 @@ export default function ReaderHeader({
                   ? 'bg-purple-600/20 border-purple-500/40 text-purple-300 hover:bg-purple-600/30'
                   : 'bg-white/5 border-white/10 text-white/60 hover:text-white hover:bg-white/10'
               }`}
-              title={isEpubMode ? 'ორიგინალი PDF-ის ნახვა' : 'EPUB რეჟიმზე გადასვლა'}
+              title={isEpubMode ? t.readerSwitchToPdf : t.readerSwitchToEpub}
             >
               {isEpubMode ? 'EPUB' : 'PDF'}
             </button>
@@ -483,7 +485,7 @@ export default function ReaderHeader({
                   value={pageInput}
                   onChange={(e) => setPageInput(e.target.value)}
                   onKeyDown={handlePageKeyDown}
-                  placeholder="Page #"
+                  placeholder={t.readerPagePlaceholder}
                   className="w-16 px-2 py-1 rounded text-xs bg-white/10 border border-white/20
                     text-white placeholder:text-white/30 focus:outline-none focus:border-purple-500
                     transition-colors"
@@ -492,14 +494,14 @@ export default function ReaderHeader({
                   onClick={handleJump}
                   className="px-2 py-1 text-xs rounded-lg bg-purple-600/50 hover:bg-purple-600/80 transition-colors"
                 >
-                  Go
+                  {t.readerPageGo}
                 </button>
               </div>
 
               <button
                 onClick={onToggleSearch}
                 className="p-1.5 rounded-xl hover:bg-white/10 transition-colors"
-                title="Search in PDF (Ctrl+F)"
+                title={t.readerSearchPdf}
               >
                 <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
@@ -509,7 +511,7 @@ export default function ReaderHeader({
               <button
                 onClick={() => onZoomChange(Math.max(0.5, zoomLevel - 0.1))}
                 className="p-1.5 rounded-xl hover:bg-white/10 transition-colors"
-                title="Zoom out"
+                title={t.readerZoomOut}
               >
                 <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20 12H4" />
@@ -521,7 +523,7 @@ export default function ReaderHeader({
               <button
                 onClick={() => onZoomChange(Math.min(2.0, zoomLevel + 0.1))}
                 className="p-1.5 rounded-xl hover:bg-white/10 transition-colors"
-                title="Zoom in"
+                title={t.readerZoomIn}
               >
                 <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
@@ -537,7 +539,7 @@ export default function ReaderHeader({
               className={`p-1.5 rounded-xl transition-colors ${
                 showSidebar ? 'bg-purple-500/20 text-purple-300' : 'hover:bg-white/10 text-white/50'
               }`}
-              title="თარგმანის გვერდითა პანელის ჩართვა/გამორთვა"
+              title={t.readerToggleSidebar}
             >
               <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 5h12M9 3v2m1.048 9.5A18.022 18.022 0 016.412 9m6.088 9h7M11 21l5-10 5 10M12.751 5C11.783 10.77 8.07 15.61 3 18.129" />
@@ -549,7 +551,7 @@ export default function ReaderHeader({
           <button
             onClick={onOpenSettings}
             className="p-1.5 rounded-xl hover:bg-white/10 transition-colors text-purple-400 hover:text-purple-300"
-            title="AI თარგმანის პარამეტრები"
+            title={t.readerAiSettings}
           >
             <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path
@@ -568,7 +570,7 @@ export default function ReaderHeader({
             className={`rounded-xl hover:bg-white/10 transition-colors ${
               isMobile ? 'p-1.5' : 'px-3 py-1.5 text-xs border border-white/15'
             }`}
-            title="გასვლა"
+            title={t.navSignOut}
           >
             {isMobile ? (
               <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -580,7 +582,7 @@ export default function ReaderHeader({
                 />
               </svg>
             ) : (
-              'Sign Out'
+              t.navSignOut
             )}
           </button>
         </div>

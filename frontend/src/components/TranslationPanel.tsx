@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useLanguage } from '../lib/i18n';
 import type { WordTranslationResult } from '../hooks/useTranslation';
 import type { VocabularyWord } from '../lib/api';
 import { updateVocabularyWord } from '../lib/api';
@@ -33,6 +34,7 @@ export default function TranslationPanel({
   checkingExisting,
   onVocabularyUpdated,
 }: TranslationPanelProps) {
+  const { t } = useLanguage();
   const showWordDetails = wordResult !== null;
   const [editingWord, setEditingWord] = useState<VocabularyWord | null>(null);
   const [editTranslation, setEditTranslation] = useState('');
@@ -72,13 +74,13 @@ export default function TranslationPanel({
         <div className="flex items-center gap-2">
           <span className="w-2 h-2 rounded-full bg-purple-400"></span>
           <span className="text-xs font-semibold tracking-wider text-white/50 uppercase">
-            Translation
+            {t.readerTranslation}
           </span>
         </div>
         <button
           onClick={onClose}
           className="p-1 rounded-lg hover:bg-white/10 text-white/40 hover:text-white transition-colors"
-          title="Close"
+          title={t.close}
         >
           <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
@@ -89,7 +91,7 @@ export default function TranslationPanel({
       {/* Loading state */}
       {translating && (
         <div className="py-8 flex flex-col items-center justify-center">
-          <LoadingSpinner message="Translating..." light />
+          <LoadingSpinner message={t.readerTranslating} light />
         </div>
       )}
 
@@ -103,7 +105,7 @@ export default function TranslationPanel({
             onClick={onTranslate}
             className="w-full py-2.5 rounded-xl bg-purple-600 hover:bg-purple-500 text-sm font-semibold text-white shadow-lg shadow-purple-600/30 transition-all hover:scale-[1.01]"
           >
-            Translate to Georgian
+            {t.readerTranslateAction}
           </button>
         </div>
       )}
@@ -124,7 +126,7 @@ export default function TranslationPanel({
             <button
               onClick={() => speakWord(wordResult.original)}
               className="p-2 rounded-xl bg-white/10 hover:bg-purple-500/20 text-white/80 hover:text-purple-300 transition-colors flex-shrink-0"
-              title="Pronounce"
+              title={t.vocabPronounce}
             >
               <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path
@@ -137,7 +139,7 @@ export default function TranslationPanel({
             </button>
           </div>
 
-          {/* Georgian Meaning */}
+          {/* Meaning */}
           <div className="text-base font-semibold text-purple-300 leading-snug">
             {wordResult.translation}
           </div>
@@ -166,7 +168,7 @@ export default function TranslationPanel({
           {/* Already Saved indicator */}
           {existingWord && !checkingExisting && (
             <div className="flex items-center justify-between text-xs text-blue-300 bg-blue-500/10 px-3 py-2 rounded-xl">
-              <span>Already in vocabulary</span>
+              <span>{t.readerAlreadyInVocab}</span>
               <button
                 onClick={() => {
                   setEditingWord(existingWord);
@@ -174,7 +176,7 @@ export default function TranslationPanel({
                 }}
                 className="underline hover:text-white"
               >
-                Edit
+                {t.edit}
               </button>
             </div>
           )}
@@ -190,7 +192,7 @@ export default function TranslationPanel({
                   : 'bg-purple-600 hover:bg-purple-500 text-white shadow-lg shadow-purple-600/30 hover:scale-[1.01]'
               }`}
             >
-              {savedToVocabulary ? '✓ Saved to Vocabulary' : '+ Add to Vocabulary'}
+              {savedToVocabulary ? t.readerSavedToVocab : t.readerAddToVocab}
             </button>
           )}
         </div>
@@ -219,7 +221,7 @@ export default function TranslationPanel({
       {editingWord && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
           <div className="bg-gray-900 border border-white/15 rounded-2xl p-5 w-full max-w-sm mx-4 space-y-4 shadow-2xl">
-            <h4 className="font-semibold text-sm">Edit Translation</h4>
+            <h4 className="font-semibold text-sm">{t.readerEditTranslationTitle}</h4>
             <input
               type="text"
               value={editTranslation}
@@ -232,13 +234,13 @@ export default function TranslationPanel({
                 disabled={savingEdit}
                 className="flex-1 py-2 bg-purple-600 hover:bg-purple-500 rounded-xl text-xs font-semibold text-white transition-colors"
               >
-                {savingEdit ? 'Saving...' : 'Save'}
+                {savingEdit ? t.readerSaving : t.save}
               </button>
               <button
                 onClick={() => setEditingWord(null)}
                 className="px-4 py-2 bg-white/10 hover:bg-white/20 rounded-xl text-xs text-white transition-colors"
               >
-                Cancel
+                {t.cancel}
               </button>
             </div>
           </div>

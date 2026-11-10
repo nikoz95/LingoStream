@@ -101,7 +101,7 @@ interface ProviderPreset {
   badge: string;
   icon: string;
   keyUrl: string;
-  models: { id: string; name: string; tag: string }[];
+  models: { id: string; name: string; tagKa: string; tagEn: string }[];
 }
 
 const PROVIDER_PRESETS: ProviderPreset[] = [
@@ -112,9 +112,9 @@ const PROVIDER_PRESETS: ProviderPreset[] = [
     icon: '🔷',
     keyUrl: 'https://aistudio.google.com/apikey',
     models: [
-      { id: 'gemini-2.5-flash', name: 'Gemini 2.5 Flash', tag: 'სწრაფი & რეკომენდებული' },
-      { id: 'gemini-2.5-pro', name: 'Gemini 2.5 Pro', tag: 'მაღალი ლიტერატურული დონე' },
-      { id: 'gemini-1.5-flash', name: 'Gemini 1.5 Flash', tag: 'სტაბილური fallback' },
+      { id: 'gemini-2.5-flash', name: 'Gemini 2.5 Flash', tagKa: 'სწრაფი & რეკომენდებული', tagEn: 'Fast & Recommended' },
+      { id: 'gemini-2.5-pro', name: 'Gemini 2.5 Pro', tagKa: 'მაღალი ლიტერატურული დონე', tagEn: 'Advanced Literary Quality' },
+      { id: 'gemini-1.5-flash', name: 'Gemini 1.5 Flash', tagKa: 'სტაბილური fallback', tagEn: 'Stable Fallback' },
     ],
   },
   {
@@ -124,8 +124,8 @@ const PROVIDER_PRESETS: ProviderPreset[] = [
     icon: '🐋',
     keyUrl: 'https://platform.deepseek.com/',
     models: [
-      { id: 'deepseek-chat', name: 'DeepSeek V3 (Chat)', tag: 'ძლიერი ლიტერატურული ენა' },
-      { id: 'deepseek-reasoner', name: 'DeepSeek R1', tag: 'ღრმა გრამატიკული ანალიზი' },
+      { id: 'deepseek-chat', name: 'DeepSeek V3 (Chat)', tagKa: 'ძლიერი ლიტერატურული ენა', tagEn: 'Rich Literary Language' },
+      { id: 'deepseek-reasoner', name: 'DeepSeek R1', tagKa: 'ღრმა გრამატიკული ანალიზი', tagEn: 'Deep Grammar Reasoning' },
     ],
   },
   {
@@ -135,8 +135,8 @@ const PROVIDER_PRESETS: ProviderPreset[] = [
     icon: '🟢',
     keyUrl: 'https://platform.openai.com/api-keys',
     models: [
-      { id: 'gpt-4o-mini', name: 'GPT-4o Mini', tag: 'სწრაფი და ეკონომიური' },
-      { id: 'gpt-4o', name: 'GPT-4o', tag: 'ფლაგმანი მოდელი' },
+      { id: 'gpt-4o-mini', name: 'GPT-4o Mini', tagKa: 'სწრაფი და ეკონომიური', tagEn: 'Fast & Cost-Efficient' },
+      { id: 'gpt-4o', name: 'GPT-4o', tagKa: 'ფლაგმანი მოდელი', tagEn: 'Flagship Model' },
     ],
   },
   {
@@ -146,8 +146,8 @@ const PROVIDER_PRESETS: ProviderPreset[] = [
     icon: '💻',
     keyUrl: 'https://ollama.com/',
     models: [
-      { id: 'mistral', name: 'Mistral 7B', tag: 'სწრაფი ლოკალური' },
-      { id: 'llama3', name: 'Llama 3 8B', tag: 'ძლიერი ლოკალური' },
+      { id: 'mistral', name: 'Mistral 7B', tagKa: 'სწრაფი ლოკალური', tagEn: 'Fast Local' },
+      { id: 'llama3', name: 'Llama 3 8B', tagKa: 'ძლიერი ლოკალური', tagEn: 'Powerful Local' },
     ],
   },
 ];
@@ -239,7 +239,7 @@ export default function SettingsModal({
     } catch (err) {
       setTestResult({
         success: false,
-        message: err instanceof Error ? err.message : 'ტესტირება ვერ მოხერხდა',
+        message: err instanceof Error ? err.message : (lang === 'ka' ? 'ტესტირება ვერ მოხერხდა' : 'Connection test failed'),
       });
     } finally {
       setTesting(false);
@@ -339,7 +339,7 @@ export default function SettingsModal({
                           </div>
                           {isSelected && (
                             <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-purple-500 text-white">
-                              ✓ აქტიური
+                              {lang === 'ka' ? '✓ აქტიური' : '✓ Active'}
                             </span>
                           )}
                         </div>
@@ -481,7 +481,7 @@ export default function SettingsModal({
                 {/* Active Topics Chips */}
                 <div className="space-y-2">
                   <span className="text-[11px] font-semibold text-white/60 block">
-                    დამატებული თემები ({settings.customTopics.length}):
+                    {lang === 'ka' ? `დამატებული თემები (${settings.customTopics.length}):` : `Added Topics (${settings.customTopics.length}):`}
                   </span>
                   <div className="flex flex-wrap gap-2">
                     {settings.customTopics.map((topic, idx) => (
@@ -494,7 +494,7 @@ export default function SettingsModal({
                           type="button"
                           onClick={() => settings.removeCustomTopic(topic)}
                           className="hover:text-red-400 text-white/40 ml-1 transition-colors cursor-pointer text-xs"
-                          title="წაშლა"
+                          title={t.delete}
                         >
                           ✕
                         </button>
@@ -621,7 +621,7 @@ export default function SettingsModal({
                   >
                     {selectedPreset.models.map((m) => (
                       <option key={m.id} value={m.id} className="bg-gray-900 text-white">
-                        {m.name} — {m.tag}
+                        {m.name} — {lang === 'ka' ? m.tagKa : m.tagEn}
                       </option>
                     ))}
                   </select>
@@ -635,7 +635,9 @@ export default function SettingsModal({
                     {t.aiApiKeyLabel}
                   </label>
                   <span className="text-[10px] text-white/40">
-                    {settings.aiApiKey ? '● პირადი გასაღები გაწერილია' : '○ სისტემური ნაგულისხმევი'}
+                    {settings.aiApiKey
+                      ? (lang === 'ka' ? '● პირადი გასაღები გაწერილია' : '● Personal API key configured')
+                      : (lang === 'ka' ? '○ სისტემური ნაგულისხმევი' : '○ System default')}
                   </span>
                 </div>
                 <div className="relative">
@@ -658,7 +660,7 @@ export default function SettingsModal({
                           setTestResult(null);
                         }}
                         className="p-1 text-xs text-white/40 hover:text-white transition-colors cursor-pointer"
-                        title="გასუფთავება"
+                        title={lang === 'ka' ? 'გასუფთავება' : 'Clear'}
                       >
                         ✕
                       </button>
@@ -667,7 +669,7 @@ export default function SettingsModal({
                       type="button"
                       onClick={() => setShowApiKey(!showApiKey)}
                       className="px-2 py-1 text-xs text-white/50 hover:text-white rounded-lg bg-white/5 hover:bg-white/10 transition-colors cursor-pointer"
-                      title={showApiKey ? 'დამალვა' : 'ჩვენება'}
+                      title={showApiKey ? (lang === 'ka' ? 'დამალვა' : 'Hide') : (lang === 'ka' ? 'ჩვენება' : 'Show')}
                     >
                       {showApiKey ? '🙈' : '👁️'}
                     </button>

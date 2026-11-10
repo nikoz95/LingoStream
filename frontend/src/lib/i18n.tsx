@@ -191,6 +191,74 @@ export interface Translations {
   aiTestSuccess: string;
   aiTestFail: string;
   aiGetKeyLink: string;
+
+  // Reader & Viewer
+  readerBackToLibrary: string;
+  readerTocTitle: string;
+  readerTocHeader: string;
+  readerDefaultTitle: string;
+  readerLayout1Page: string;
+  readerLayout1PageTooltip: string;
+  readerLayout2Pages: string;
+  readerLayout2PagesTooltip: string;
+  readerLayoutScroll: string;
+  readerLayoutScrollTooltip: string;
+  readerAppearanceTitle: string;
+  readerLayoutLabel: string;
+  readerLayoutPages: string;
+  readerThemeLabel: string;
+  readerThemeNight: string;
+  readerThemeSepia: string;
+  readerThemeLight: string;
+  readerFontLabel: string;
+  readerFontSize: string;
+  readerLineSpacingLabel: string;
+  readerLineSpacingTight: string;
+  readerLineSpacingNormal: string;
+  readerLineSpacingWide: string;
+  readerTextWidthLabel: string;
+  readerTextWidthNarrow: string;
+  readerTextWidthMedium: string;
+  readerTextWidthWide: string;
+  readerSwitchToPdf: string;
+  readerSwitchToEpub: string;
+  readerPagePlaceholder: string;
+  readerPageGo: string;
+  readerSearchPdf: string;
+  readerZoomOut: string;
+  readerZoomIn: string;
+  readerToggleSidebar: string;
+  readerAiSettings: string;
+  readerPreparingEpub: string;
+  readerLoadingPdf: string;
+  readerNoPages: string;
+  readerPrevPage: string;
+  readerNextPage: string;
+  readerTranslateBtn: string;
+  readerSelectedWord: string;
+  readerSelectedSentence: string;
+  readerTranslation: string;
+  readerSelectedText: string;
+  readerTranslating: string;
+  readerTranslateAction: string;
+  readerAlreadyInVocab: string;
+  readerAddToVocab: string;
+  readerSavedToVocab: string;
+  readerEditTranslationTitle: string;
+  readerSaving: string;
+  readerSearchPlaceholder: string;
+  readerCloseSearch: string;
+  readerSearching: string;
+  readerMatchesCount: string;
+  readerMatchCount: string;
+  readerPrevMatch: string;
+  readerNextMatch: string;
+  readerNoResults: string;
+  readerPageLabel: string;
+  readerHideThumbnails: string;
+  readerShowThumbnails: string;
+  readerHide: string;
+  readerPages: string;
 }
 
 const translations: Record<UILanguage, Translations> = {
@@ -383,6 +451,74 @@ const translations: Record<UILanguage, Translations> = {
     aiTestSuccess: 'კავშირი წარმატებით დამყარდა!',
     aiTestFail: 'კავშირი ვერ დამყარდა',
     aiGetKeyLink: 'გასაღების მიღება ↗',
+
+    // Reader & Viewer
+    readerBackToLibrary: 'ბიბლიოთეკაში დაბრუნება',
+    readerTocTitle: 'სარჩევი',
+    readerTocHeader: 'სარჩევი (თავები)',
+    readerDefaultTitle: 'კითხვა',
+    readerLayout1Page: '1 გვერდი',
+    readerLayout1PageTooltip: '1 გვერდი (გადაფურცვლა)',
+    readerLayout2Pages: '2 გვერდი',
+    readerLayout2PagesTooltip: '2 გვერდი (გაშლილი წიგნი)',
+    readerLayoutScroll: 'სქროლი',
+    readerLayoutScrollTooltip: 'უწყვეტი სქროლი',
+    readerAppearanceTitle: 'კითხვის პარამეტრები (შრიფტი, ფერი, ზომა)',
+    readerLayoutLabel: 'განლაგება',
+    readerLayoutPages: 'გვერდები',
+    readerThemeLabel: 'ფონის ფერი',
+    readerThemeNight: 'ღამე',
+    readerThemeSepia: 'სეპია',
+    readerThemeLight: 'დღე',
+    readerFontLabel: 'შრიფტი',
+    readerFontSize: 'შრიფტის ზომა',
+    readerLineSpacingLabel: 'სტრიქონებს შორის დაშორება',
+    readerLineSpacingTight: 'მჭიდრო',
+    readerLineSpacingNormal: 'სტანდარტული',
+    readerLineSpacingWide: 'ფართო',
+    readerTextWidthLabel: 'ტექსტის სიგანე',
+    readerTextWidthNarrow: 'ვიწრო',
+    readerTextWidthMedium: 'საშუალო',
+    readerTextWidthWide: 'ფართო',
+    readerSwitchToPdf: 'ორიგინალი PDF-ის ნახვა',
+    readerSwitchToEpub: 'EPUB რეჟიმზე გადასვლა',
+    readerPagePlaceholder: 'გვერდი #',
+    readerPageGo: 'გადასვლა',
+    readerSearchPdf: 'ძებნა PDF-ში (Ctrl+F)',
+    readerZoomOut: 'დაპატარავება',
+    readerZoomIn: 'გადიდება',
+    readerToggleSidebar: 'თარგმანის გვერდითა პანელი',
+    readerAiSettings: 'AI & კითხვის პარამეტრები',
+    readerPreparingEpub: 'წიგნი მზადდება EPUB ფორმატში...',
+    readerLoadingPdf: 'იტვირთება PDF...',
+    readerNoPages: 'გვერდები ვერ ჩაიტვირთა',
+    readerPrevPage: 'წინა გვერდი (←)',
+    readerNextPage: 'შემდეგი გვერდი (→)',
+    readerTranslateBtn: 'თარგმნა',
+    readerSelectedWord: 'მონიშნული სიტყვა',
+    readerSelectedSentence: 'მონიშნული წინადადება',
+    readerTranslation: 'თარგმანი',
+    readerSelectedText: 'მონიშნული ტექსტი',
+    readerTranslating: 'ითარგმნება...',
+    readerTranslateAction: 'თარგმნა',
+    readerAlreadyInVocab: 'უკვე ლექსიკონშია',
+    readerAddToVocab: '+ ლექსიკონში დამატება',
+    readerSavedToVocab: '✓ შენახულია ლექსიკონში',
+    readerEditTranslationTitle: 'თარგმანის რედაქტირება',
+    readerSaving: 'ინახება...',
+    readerSearchPlaceholder: 'ძებნა დოკუმენტში…',
+    readerCloseSearch: 'ძებნის დახურვა (Esc)',
+    readerSearching: 'იძებნება…',
+    readerMatchesCount: 'შედეგი',
+    readerMatchCount: 'შედეგი',
+    readerPrevMatch: 'წინა შედეგი (Shift+Enter)',
+    readerNextMatch: 'შემდეგი შედეგი (Enter)',
+    readerNoResults: 'შედეგი ვერ მოიძებნა',
+    readerPageLabel: 'გვერდი',
+    readerHideThumbnails: 'მინიატურების დამალვა',
+    readerShowThumbnails: 'მინიატურების ჩვენება',
+    readerHide: '◀ დამალვა',
+    readerPages: '▶ გვერდები',
   },
   en: {
     // Navigation & General
@@ -573,6 +709,74 @@ const translations: Record<UILanguage, Translations> = {
     aiTestSuccess: 'Connection verified successfully!',
     aiTestFail: 'Connection failed',
     aiGetKeyLink: 'Get Key ↗',
+
+    // Reader & Viewer
+    readerBackToLibrary: 'Back to Library',
+    readerTocTitle: 'Table of Contents',
+    readerTocHeader: 'Table of Contents (Chapters)',
+    readerDefaultTitle: 'Reading',
+    readerLayout1Page: '1 Page',
+    readerLayout1PageTooltip: '1 Page (Flip)',
+    readerLayout2Pages: '2 Pages',
+    readerLayout2PagesTooltip: '2 Pages (Spread)',
+    readerLayoutScroll: 'Scroll',
+    readerLayoutScrollTooltip: 'Continuous Scroll',
+    readerAppearanceTitle: 'Reading Settings (Font, Theme, Size)',
+    readerLayoutLabel: 'Layout',
+    readerLayoutPages: 'Pages',
+    readerThemeLabel: 'Theme',
+    readerThemeNight: 'Night',
+    readerThemeSepia: 'Sepia',
+    readerThemeLight: 'Light',
+    readerFontLabel: 'Font',
+    readerFontSize: 'Font Size',
+    readerLineSpacingLabel: 'Line Spacing',
+    readerLineSpacingTight: 'Tight',
+    readerLineSpacingNormal: 'Normal',
+    readerLineSpacingWide: 'Wide',
+    readerTextWidthLabel: 'Text Width',
+    readerTextWidthNarrow: 'Narrow',
+    readerTextWidthMedium: 'Medium',
+    readerTextWidthWide: 'Wide',
+    readerSwitchToPdf: 'View Original PDF',
+    readerSwitchToEpub: 'Switch to EPUB Mode',
+    readerPagePlaceholder: 'Page #',
+    readerPageGo: 'Go',
+    readerSearchPdf: 'Search in PDF (Ctrl+F)',
+    readerZoomOut: 'Zoom Out',
+    readerZoomIn: 'Zoom In',
+    readerToggleSidebar: 'Toggle Translation Panel',
+    readerAiSettings: 'AI & Reading Settings',
+    readerPreparingEpub: 'Preparing book in EPUB format...',
+    readerLoadingPdf: 'Loading PDF...',
+    readerNoPages: 'No pages loaded',
+    readerPrevPage: 'Previous Page (←)',
+    readerNextPage: 'Next Page (→)',
+    readerTranslateBtn: 'Translate',
+    readerSelectedWord: 'Selected Word',
+    readerSelectedSentence: 'Selected Sentence',
+    readerTranslation: 'Translation',
+    readerSelectedText: 'Selected Text',
+    readerTranslating: 'Translating...',
+    readerTranslateAction: 'Translate',
+    readerAlreadyInVocab: 'Already in vocabulary',
+    readerAddToVocab: '+ Add to Vocabulary',
+    readerSavedToVocab: '✓ Saved to Vocabulary',
+    readerEditTranslationTitle: 'Edit Translation',
+    readerSaving: 'Saving...',
+    readerSearchPlaceholder: 'Search in document…',
+    readerCloseSearch: 'Close search (Esc)',
+    readerSearching: 'Searching…',
+    readerMatchesCount: 'matches',
+    readerMatchCount: 'match',
+    readerPrevMatch: 'Previous match (Shift+Enter)',
+    readerNextMatch: 'Next match (Enter)',
+    readerNoResults: 'No results found',
+    readerPageLabel: 'Page',
+    readerHideThumbnails: 'Hide thumbnails',
+    readerShowThumbnails: 'Show thumbnails',
+    readerHide: '◀ HIDE',
+    readerPages: '▶ PAGES',
   },
 };
 

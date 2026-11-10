@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef } from 'react';
+import { useLanguage } from '../lib/i18n';
 import type { PdfSearchState } from '../hooks/usePdfSearch';
 
 interface SearchPanelProps {
@@ -22,6 +23,7 @@ export default function SearchPanel({
   onClose,
   onNavToPage,
 }: SearchPanelProps) {
+  const { t } = useLanguage();
   const inputRef = useRef<HTMLInputElement>(null);
   const resultsRef = useRef<HTMLDivElement>(null);
 
@@ -97,7 +99,7 @@ export default function SearchPanel({
             value={query}
             onChange={handleChange}
             onKeyDown={handleKeyDown}
-            placeholder="Search in document…"
+            placeholder={t.readerSearchPlaceholder}
             className="w-full px-3 py-2 pr-8 rounded-lg text-sm
               bg-white/10 border border-white/20 text-white
               placeholder:text-white/30 focus:outline-none focus:border-purple-500
@@ -107,7 +109,7 @@ export default function SearchPanel({
             onClick={onClose}
             className="absolute right-2 top-1/2 -translate-y-1/2 p-0.5
               text-white/40 hover:text-white/80 transition-colors"
-            title="Close search (Esc)"
+            title={t.readerCloseSearch}
           >
             <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
@@ -117,7 +119,7 @@ export default function SearchPanel({
 
         {/* Searching indicator */}
         {searchState?.searching && (
-          <p className="mt-2 text-xs text-white/40 italic">Searching…</p>
+          <p className="mt-2 text-xs text-white/40 italic">{t.readerSearching}</p>
         )}
 
         {/* Error */}
@@ -129,7 +131,7 @@ export default function SearchPanel({
         {!searchState?.searching && totalMatches > 0 && (
           <div className="flex items-center justify-between mt-2 text-xs">
             <span className="text-white/50">
-              {totalMatches} {totalMatches === 1 ? 'match' : 'matches'}
+              {totalMatches} {totalMatches === 1 ? t.readerMatchCount : t.readerMatchesCount}
             </span>
             <div className="flex items-center gap-1">
               <span className="text-white/70 mr-1">
@@ -138,7 +140,7 @@ export default function SearchPanel({
               <button
                 onClick={() => onGoToMatch('prev')}
                 className="p-1 rounded hover:bg-white/10 transition-colors"
-                title="Previous match (Shift+Enter)"
+                title={t.readerPrevMatch}
               >
                 <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 15l7-7 7 7" />
@@ -147,7 +149,7 @@ export default function SearchPanel({
               <button
                 onClick={() => onGoToMatch('next')}
                 className="p-1 rounded hover:bg-white/10 transition-colors"
-                title="Next match (Enter)"
+                title={t.readerNextMatch}
               >
                 <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
@@ -159,7 +161,7 @@ export default function SearchPanel({
 
         {/* No results */}
         {!searchState?.searching && query.trim() && totalMatches === 0 && (
-          <p className="mt-2 text-xs text-white/40">No results found</p>
+          <p className="mt-2 text-xs text-white/40">{t.readerNoResults}</p>
         )}
       </div>
 
@@ -176,7 +178,7 @@ export default function SearchPanel({
                 : ''}`}
           >
             <span className="text-[11px] font-medium text-purple-400 block mb-1">
-              Page {pageIdx}
+              {t.readerPageLabel} {pageIdx}
             </span>
             <span className="text-white/50 text-xs leading-relaxed line-clamp-2">
               {group.texts.slice(0, 3).join(' … ')}

@@ -4,7 +4,6 @@ import {
   listBooks,
   registerBook,
   deleteBook,
-  logout,
   getDiscoverFeed,
   importDiscoverItem,
   type BookListItem,
@@ -14,7 +13,7 @@ import {
 } from '../lib/api';
 import { useLanguage, type Translations } from '../lib/i18n';
 import { useSettings } from '../lib/settings';
-import LanguageToggle from '../components/LanguageToggle';
+import AppLayout from '../components/AppLayout';
 import LoadingSpinner from '../components/LoadingSpinner';
 import SettingsModal from '../components/SettingsModal';
 
@@ -56,14 +55,13 @@ const getCefrLevels = (t: Translations): { level: CefrLevel; label: string; desc
 
 export default function LibraryPage() {
   const navigate = useNavigate();
-  const { t, lang } = useLanguage();
+  const { t } = useLanguage();
   const settings = useSettings();
   const [activeTab, setActiveTab] = useState<'library' | 'discover'>('library');
   const [books, setBooks] = useState<BookListItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [upload, setUpload] = useState<UploadState>({ uploading: false, error: '', success: '' });
   const [deleting, setDeleting] = useState<number | null>(null);
-  const fileRef = useState<HTMLInputElement | null>(null);
 
   // Discover state
   const [selectedCategory, setSelectedCategory] = useState<string>('ai');
@@ -79,16 +77,13 @@ export default function LibraryPage() {
   const [importing, setImporting] = useState<boolean>(false);
   const [importError, setImportError] = useState<string>('');
 
-  // Synchronize default CEFR level with settings
   useEffect(() => {
     if (settings.targetCefr) {
       setCefrLevel(settings.targetCefr);
     }
   }, [settings.targetCefr]);
 
-  // Custom prompt generator state
   const [customTitle, setCustomTitle] = useState('');
-
   const categories = useMemo(() => getCategories(t), [t]);
   const cefrLevels = useMemo(() => getCefrLevels(t), [t]);
 
@@ -140,15 +135,18 @@ export default function LibraryPage() {
 
     try {
       const result = await registerBook(file);
-      setBooks(prev => [{
-        id: result.id,
-        title: result.title,
-        author: result.author,
-        total_chapters: result.total_chapters,
-        language: result.language,
-        status: result.status,
-        created_at: result.created_at,
-      }, ...prev]);
+      setBooks(prev => [
+        {
+          id: result.id,
+          title: result.title,
+          author: result.author,
+          total_chapters: result.total_chapters,
+          language: result.language,
+          status: result.status,
+          created_at: result.created_at,
+        },
+        ...prev,
+      ]);
       setUpload({ uploading: false, error: '', success: `"${result.title}" uploaded successfully` });
       setTimeout(() => setUpload(prev => ({ ...prev, success: '' })), 3000);
     } catch (err) {
@@ -171,15 +169,6 @@ export default function LibraryPage() {
       setDeleting(null);
     }
   }, [t.deleteBookConfirm]);
-
-  const handleLogout = useCallback(async () => {
-    try {
-      await logout();
-    } catch {
-      // ignore
-    }
-    navigate('/login');
-  }, [navigate]);
 
   const handleRead = useCallback((bookId: number) => {
     navigate(`/reader/${bookId}`);
@@ -238,15 +227,18 @@ export default function LibraryPage() {
         cefr_level: cefrLevel,
         include_original_chapter: includeOriginal,
       });
-      setBooks(prev => [{
-        id: createdBook.id,
-        title: createdBook.title,
-        author: createdBook.author,
-        total_chapters: createdBook.total_chapters,
-        language: createdBook.language,
-        status: createdBook.status,
-        created_at: createdBook.created_at,
-      }, ...prev]);
+      setBooks(prev => [
+        {
+          id: createdBook.id,
+          title: createdBook.title,
+          author: createdBook.author,
+          total_chapters: createdBook.total_chapters,
+          language: createdBook.language,
+          status: createdBook.status,
+          created_at: createdBook.created_at,
+        },
+        ...prev,
+      ]);
       setSelectedItem(null);
       navigate(`/reader/${createdBook.id}`);
     } catch (err) {
@@ -258,473 +250,489 @@ export default function LibraryPage() {
 
   if (loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-gray-900 via-purple-900 to-gray-900">
-        <LoadingSpinner message="Loading your library..." />
-      </div>
+      <AppLayout>
+        <div className="min-h-[50vh] flex items-center justify-center">
+          <LoadingSpinner message={t.loading} />
+        </div>
+      </AppLayout>
     );
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-gray-900 via-purple-900 to-gray-900 text-white">
-      {/* Header */}
-      <header className="glass border-b border-white/10 px-4 lg:px-8 h-16 flex items-center justify-between">
-        <h1 className="text-xl font-bold bg-gradient-to-r from-purple-400 to-pink-400 bg-clip-text text-transparent">
-          LingoStream
-        </h1>
-        <div className="flex items-center gap-3">
-          <LanguageToggle />
+    <AppLayout>
+      {/* Top Segmented Controls: Library vs Discover */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
+        <div
+          className="inline-flex p-1 rounded-xl border self-start"
+          style={{
+            backgroundColor: 'var(--bg-surface)',
+            borderColor: 'var(--border-subtle)',
+          }}
+        >
           <button
-            onClick={settings.openSettings}
-            className="px-3.5 py-2 text-sm rounded-xl border border-white/15 hover:bg-white/10 hover:border-purple-400/30 transition-all duration-200 flex items-center gap-1.5 cursor-pointer text-white"
-            title={t.navSettings}
+            onClick={() => setActiveTab('library')}
+            className="px-4 py-2 rounded-lg text-xs sm:text-sm font-semibold transition-all cursor-pointer flex items-center gap-2"
+            style={{
+              backgroundColor: activeTab === 'library' ? 'var(--bg-elevated)' : 'transparent',
+              color: activeTab === 'library' ? 'var(--app-text)' : 'var(--app-text-muted)',
+              border: activeTab === 'library' ? '1px solid var(--border-strong)' : '1px solid transparent',
+            }}
           >
-            <span>⚙️</span>
-            <span className="hidden sm:inline">{t.navSettings}</span>
+            <span>📚</span>
+            <span>
+              {t.myLibrary} ({books.length})
+            </span>
           </button>
           <button
-            onClick={() => navigate('/writing')}
-            className="px-4 py-2 text-sm rounded-xl border border-purple-400/30 bg-purple-500/10 hover:bg-purple-500/20 hover:border-purple-400/50 transition-all duration-200 flex items-center gap-2 cursor-pointer"
+            onClick={() => setActiveTab('discover')}
+            className="px-4 py-2 rounded-lg text-xs sm:text-sm font-semibold transition-all cursor-pointer flex items-center gap-2"
+            style={{
+              backgroundColor: activeTab === 'discover' ? 'var(--bg-elevated)' : 'transparent',
+              color: activeTab === 'discover' ? 'var(--app-text)' : 'var(--app-text-muted)',
+              border: activeTab === 'discover' ? '1px solid var(--border-strong)' : '1px solid transparent',
+            }}
           >
-            <span>✍️</span>
-            <span>{t.navWriting}</span>
-          </button>
-          <button
-            onClick={() => navigate('/vocabulary')}
-            className="px-4 py-2 text-sm rounded-xl border border-white/15 hover:bg-white/10 hover:border-purple-400/30 transition-all duration-200 flex items-center gap-2 cursor-pointer"
-          >
-            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-                d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
-            </svg>
-            <span>{t.navVocabulary}</span>
-          </button>
-          <button
-            onClick={handleLogout}
-            className="px-4 py-2 text-sm rounded-xl border border-white/15 hover:bg-white/10 transition-colors cursor-pointer"
-          >
-            {t.navSignOut}
+            <span>🌐</span>
+            <span>{t.discoverContent}</span>
           </button>
         </div>
-      </header>
 
-      <main className="max-w-6xl mx-auto px-4 lg:px-8 py-8">
-        {/* Top Mode Tabs: My Library vs Discover */}
-        <div className="flex flex-wrap items-center justify-between gap-4 mb-8">
-          <div className="inline-flex p-1.5 rounded-2xl bg-white/5 border border-white/10">
-            <button
-              onClick={() => setActiveTab('library')}
-              className={`px-5 py-2.5 rounded-xl text-sm font-medium transition-all cursor-pointer flex items-center gap-2 ${
-                activeTab === 'library'
-                  ? 'bg-gradient-to-r from-purple-600 to-pink-600 text-white shadow-lg shadow-purple-500/20'
-                  : 'text-white/70 hover:text-white hover:bg-white/5'
-              }`}
-            >
-              <span>📚</span>
-              <span>{t.myLibrary} ({books.length})</span>
-            </button>
-            <button
-              onClick={() => setActiveTab('discover')}
-              className={`px-5 py-2.5 rounded-xl text-sm font-medium transition-all cursor-pointer flex items-center gap-2 ${
-                activeTab === 'discover'
-                  ? 'bg-gradient-to-r from-purple-600 to-pink-600 text-white shadow-lg shadow-purple-500/20'
-                  : 'text-white/70 hover:text-white hover:bg-white/5'
-              }`}
-            >
-              <span>🌐</span>
-              <span>{t.discoverContent}</span>
-            </button>
-          </div>
+        {activeTab === 'library' && (
+          <label
+            className="inline-flex items-center justify-center gap-2 px-4 py-2 text-xs sm:text-sm font-medium rounded-xl border transition-colors cursor-pointer self-start sm:self-auto"
+            style={{
+              backgroundColor: 'var(--bg-surface)',
+              borderColor: 'var(--border-subtle)',
+              color: 'var(--app-text)',
+            }}
+          >
+            <span>⬆️</span>
+            <span>{t.clickToUpload} (.epub, .pdf)</span>
+            <input
+              type="file"
+              accept={ACCEPTED_TYPES}
+              className="hidden"
+              onChange={handleUpload}
+              disabled={upload.uploading}
+            />
+          </label>
+        )}
+      </div>
+
+      {upload.uploading && (
+        <div className="mb-6 p-4 rounded-xl border" style={{ backgroundColor: 'var(--bg-surface)', borderColor: 'var(--border-subtle)' }}>
+          <LoadingSpinner message={t.uploadingAndProcessing} />
         </div>
+      )}
+      {upload.error && (
+        <div className="mb-6 p-3 rounded-xl border text-xs text-red-400 bg-red-500/10 border-red-500/20">
+          {upload.error}
+        </div>
+      )}
+      {upload.success && (
+        <div className="mb-6 p-3 rounded-xl border text-xs text-emerald-400 bg-emerald-500/10 border-emerald-500/20">
+          {upload.success}
+        </div>
+      )}
 
-        {activeTab === 'library' ? (
-          <>
-            {/* Upload area */}
-            <div className="mb-8">
-              <label className="flex flex-col items-center justify-center w-full h-32 border-2 border-dashed border-white/20 rounded-2xl cursor-pointer hover:border-purple-400/50 transition-colors bg-white/5">
-                <div className="flex flex-col items-center gap-2">
-                  <svg className="w-8 h-8 opacity-50" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5}
-                      d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
-                  </svg>
-                  <div className="text-sm">
-                    <span className="text-purple-400 font-medium">{t.clickToUpload}</span>
-                    <span className="opacity-50"> {t.dragAndDrop}</span>
-                  </div>
-                  <span className="text-xs opacity-40">{t.pdfOrEpub}</span>
-                </div>
-                <input
-                  ref={ref => { if (ref) fileRef[1](ref); }}
-                  type="file"
-                  accept={ACCEPTED_TYPES}
-                  className="hidden"
-                  onChange={handleUpload}
-                  disabled={upload.uploading}
-                />
-              </label>
-
-              {upload.uploading && (
-                <div className="mt-4">
-                  <LoadingSpinner message={t.uploadingAndProcessing} />
-                </div>
-              )}
-              {upload.error && (
-                <p className="mt-2 text-sm text-red-400">{upload.error}</p>
-              )}
-              {upload.success && (
-                <p className="mt-2 text-sm text-green-400">{upload.success}</p>
-              )}
+      {activeTab === 'library' ? (
+        <>
+          {books.length === 0 ? (
+            <div
+              className="text-center py-16 px-4 rounded-2xl border"
+              style={{
+                backgroundColor: 'var(--bg-surface)',
+                borderColor: 'var(--border-subtle)',
+              }}
+            >
+              <p className="text-base font-medium" style={{ color: 'var(--app-text)' }}>
+                {t.libraryEmpty}
+              </p>
+              <p className="text-xs mt-1.5" style={{ color: 'var(--app-text-muted)' }}>
+                {t.libraryEmptyDesc}{' '}
+                <button
+                  onClick={() => setActiveTab('discover')}
+                  className="font-medium underline cursor-pointer"
+                  style={{ color: 'var(--app-accent)' }}
+                >
+                  {t.discoverContent}
+                </button>
+              </p>
             </div>
-
-            {/* Books grid */}
-            {books.length === 0 ? (
-              <div className="text-center py-16">
-                <p className="text-lg opacity-50">{t.libraryEmpty}</p>
-                <p className="text-sm opacity-40 mt-2">
-                  {t.libraryEmptyDesc}{' '}
-                  <button
-                    onClick={() => setActiveTab('discover')}
-                    className="text-purple-400 underline hover:text-purple-300 cursor-pointer"
-                  >
-                    🌐 {t.discoverContent}
-                  </button>
-                </p>
-              </div>
-            ) : (
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                {books.map(book => (
-                  <div
-                    key={book.id}
-                    className="group glass rounded-2xl p-5 hover:bg-white/10 transition-all cursor-pointer"
-                    onClick={() => handleRead(book.id)}
-                  >
-                    <div className="flex items-start justify-between mb-3">
-                      <div className="flex-1 min-w-0">
-                        <h3 className="font-semibold truncate">{book.title}</h3>
-                        {book.author && (
-                          <p className="text-xs opacity-50 mt-0.5">{book.author}</p>
-                        )}
-                      </div>
+          ) : (
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3.5">
+              {books.map(book => (
+                <div
+                  key={book.id}
+                  className="group rounded-xl p-4 border transition-all cursor-pointer flex flex-col justify-between"
+                  style={{
+                    backgroundColor: 'var(--bg-surface)',
+                    borderColor: 'var(--border-subtle)',
+                  }}
+                  onClick={() => handleRead(book.id)}
+                >
+                  <div>
+                    <div className="flex items-start justify-between gap-2 mb-2">
+                      <h3 className="font-semibold text-sm truncate" style={{ color: 'var(--app-text)' }}>
+                        {book.title}
+                      </h3>
                       <button
-                        onClick={e => { e.stopPropagation(); handleDelete(book.id, book.title); }}
+                        onClick={e => {
+                          e.stopPropagation();
+                          handleDelete(book.id, book.title);
+                        }}
                         disabled={deleting === book.id}
-                        className="ml-2 p-1.5 rounded-lg opacity-0 group-hover:opacity-100 hover:bg-red-500/20 transition-all disabled:opacity-50 cursor-pointer"
+                        className="p-1 rounded-md opacity-0 group-hover:opacity-100 transition-opacity hover:bg-red-500/15 cursor-pointer text-red-400"
                         title={t.deleteBookTitle}
                       >
                         {deleting === book.id ? (
-                          <div className="w-4 h-4 border-2 border-red-400/30 border-t-red-400 rounded-full animate-spin" />
+                          <div className="w-3.5 h-3.5 border-2 border-red-400/30 border-t-red-400 rounded-full animate-spin" />
                         ) : (
-                          <svg className="w-4 h-4 text-red-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-                              d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                          <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              strokeWidth={2}
+                              d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
+                            />
                           </svg>
                         )}
                       </button>
                     </div>
 
-                    <div className="flex items-center gap-3 text-xs opacity-40">
-                      <span className="capitalize">{book.language}</span>
-                      <span>·</span>
-                      <span>{book.total_chapters} {t.booksCount}</span>
-                      {book.status === 'ready' && (
-                        <>
-                          <span>·</span>
-                          <span className="text-green-400">Ready</span>
-                        </>
-                      )}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </>
-        ) : (
-          /* ── DISCOVER & READ HUB ── */
-          <div className="space-y-6">
-            {/* Banner & Custom Topic Input */}
-            <div className="glass rounded-2xl p-5 border border-white/10 flex flex-col lg:flex-row lg:items-center justify-between gap-4">
-              <div>
-                <h2 className="text-lg font-semibold text-white flex items-center gap-2">
-                  <span>✨</span>
-                  <span>{t.discoverBannerTitle}</span>
-                </h2>
-                <p className="text-xs text-white/60 mt-1">
-                  {t.discoverBannerDesc}
-                </p>
-              </div>
-              <div className="flex items-center gap-2 w-full lg:w-auto">
-                <input
-                  type="text"
-                  value={customTitle}
-                  onChange={e => setCustomTitle(e.target.value)}
-                  onKeyDown={e => { if (e.key === 'Enter') handleOpenCustomModal(); }}
-                  placeholder={t.customTopicPlaceholder}
-                  className="flex-1 lg:w-72 px-3.5 py-2 text-sm rounded-xl bg-black/30 border border-white/15 focus:outline-none focus:border-purple-400 text-white placeholder-white/40"
-                />
-                <button
-                  onClick={handleOpenCustomModal}
-                  disabled={!customTitle.trim()}
-                  className="px-4 py-2 text-sm font-medium rounded-xl bg-purple-600 hover:bg-purple-500 disabled:opacity-40 transition-colors cursor-pointer whitespace-nowrap"
-                >
-                  {t.createCustomBtn}
-                </button>
-              </div>
-            </div>
-
-            {/* Category Pills (Standard + User Custom Topics) */}
-            <div className="space-y-2.5">
-              <div className="flex flex-wrap items-center gap-2">
-                {categories.map(cat => {
-                  const isActive = selectedCategory === cat.id;
-                  return (
-                    <button
-                      key={cat.id}
-                      onClick={() => setSelectedCategory(cat.id)}
-                      className={`px-3.5 py-2 rounded-xl text-xs font-medium transition-all cursor-pointer flex items-center gap-1.5 border ${
-                        isActive
-                          ? 'bg-purple-600/30 border-purple-400 text-white shadow-sm shadow-purple-500/20'
-                          : 'bg-white/5 border-white/10 text-white/70 hover:bg-white/10 hover:text-white'
-                      }`}
-                    >
-                      <span>{cat.icon}</span>
-                      <span>{cat.label}</span>
-                    </button>
-                  );
-                })}
-
-                {/* User-defined Custom Topics from Settings */}
-                {settings.customTopics.map(ct => {
-                  const isActive = selectedCategory === ct;
-                  return (
-                    <button
-                      key={ct}
-                      onClick={() => setSelectedCategory(ct)}
-                      className={`px-3.5 py-2 rounded-xl text-xs font-medium transition-all cursor-pointer flex items-center gap-1.5 border ${
-                        isActive
-                          ? 'bg-gradient-to-r from-purple-600/40 to-pink-600/40 border-pink-400 text-white shadow-sm shadow-pink-500/25'
-                          : 'bg-white/5 border-purple-400/20 text-purple-200 hover:bg-purple-500/10 hover:text-white'
-                      }`}
-                    >
-                      <span>🏷️</span>
-                      <span>{ct}</span>
-                    </button>
-                  );
-                })}
-
-                {/* Shortcut to manage topics in Settings */}
-                <button
-                  onClick={settings.openSettings}
-                  className="px-2.5 py-1.5 text-xs text-purple-300 hover:text-white rounded-xl hover:bg-white/10 transition-colors cursor-pointer flex items-center gap-1 border border-dashed border-purple-400/30"
-                  title={t.customTopicsTitle}
-                >
-                  <span>⚙️</span>
-                  <span>+ {t.navSettings}</span>
-                </button>
-              </div>
-            </div>
-
-            {/* Feed Items Grid */}
-            {feedLoading ? (
-              <div className="py-16 flex justify-center">
-                <LoadingSpinner message={t.feedLoading} />
-              </div>
-            ) : feedError ? (
-              <div className="glass rounded-2xl p-8 text-center border border-red-500/20">
-                <p className="text-red-400 text-sm mb-3">{feedError}</p>
-                <button
-                  onClick={() => loadFeed(selectedCategory)}
-                  className="px-4 py-2 text-xs rounded-xl bg-white/10 hover:bg-white/20 cursor-pointer"
-                >
-                  {t.feedErrorRetry}
-                </button>
-              </div>
-            ) : (
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                {feedItems.map(item => (
-                  <div
-                    key={item.id}
-                    onClick={() => openItemModal(item)}
-                    className="group glass rounded-2xl p-5 border border-white/10 hover:border-purple-400/50 hover:bg-white/10 transition-all cursor-pointer flex flex-col justify-between"
-                  >
-                    <div>
-                      <div className="flex items-center justify-between gap-2 text-xs text-purple-300/80 mb-2">
-                        <span className="px-2.5 py-0.5 rounded-full bg-purple-500/15 border border-purple-400/20 truncate">
-                          {item.source_name}
-                        </span>
-                        <span className="text-white/40 whitespace-nowrap">
-                          ⏱ {item.reading_time_minutes} {t.minRead}
-                        </span>
-                      </div>
-
-                      <h3 className="font-semibold text-base text-white group-hover:text-purple-300 transition-colors line-clamp-2 mb-2">
-                        {item.title}
-                      </h3>
-
-                      <p className="text-xs text-white/65 line-clamp-3 leading-relaxed mb-4">
-                        {item.summary}
+                    {book.author && (
+                      <p className="text-xs truncate mb-3" style={{ color: 'var(--app-text-muted)' }}>
+                        {book.author}
                       </p>
-                    </div>
+                    )}
+                  </div>
 
-                    <div className="pt-3 border-t border-white/10 flex items-center justify-between gap-2">
-                      <div className="flex flex-wrap gap-1 overflow-hidden">
-                        {item.tags.slice(0, 2).map(tag => (
-                          <span
-                            key={tag}
-                            className="text-[11px] px-2 py-0.5 rounded-md bg-white/5 text-white/50"
-                          >
-                            #{tag}
-                          </span>
-                        ))}
-                      </div>
-                      <span className="text-xs font-medium text-purple-400 group-hover:translate-x-0.5 transition-transform whitespace-nowrap">
-                        {t.selectAndRead}
+                  <div className="flex items-center gap-2 pt-2 border-t text-[11px]" style={{ borderColor: 'var(--border-subtle)', color: 'var(--app-text-muted)' }}>
+                    <span className="uppercase tracking-wider">{book.language}</span>
+                    <span>·</span>
+                    <span>
+                      {book.total_chapters} {t.booksCount}
+                    </span>
+                    {book.status === 'ready' && (
+                      <>
+                        <span>·</span>
+                        <span className="text-emerald-400 font-medium">Ready</span>
+                      </>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </>
+      ) : (
+        /* ── DISCOVER & READ HUB ── */
+        <div className="space-y-6">
+          {/* Custom Search / Topic Generator */}
+          <div
+            className="rounded-xl p-4 sm:p-5 border flex flex-col md:flex-row md:items-center justify-between gap-4"
+            style={{
+              backgroundColor: 'var(--bg-surface)',
+              borderColor: 'var(--border-subtle)',
+            }}
+          >
+            <div>
+              <h2 className="text-sm sm:text-base font-semibold flex items-center gap-2" style={{ color: 'var(--app-text)' }}>
+                <span>✨</span>
+                <span>{t.discoverBannerTitle}</span>
+              </h2>
+              <p className="text-xs mt-1" style={{ color: 'var(--app-text-muted)' }}>
+                {t.discoverBannerDesc}
+              </p>
+            </div>
+            <div className="flex items-center gap-2 w-full md:w-auto">
+              <input
+                type="text"
+                value={customTitle}
+                onChange={e => setCustomTitle(e.target.value)}
+                onKeyDown={e => {
+                  if (e.key === 'Enter') handleOpenCustomModal();
+                }}
+                placeholder={t.customTopicPlaceholder}
+                className="flex-1 md:w-64 px-3.5 py-2 text-xs sm:text-sm rounded-lg border focus:outline-none"
+                style={{
+                  backgroundColor: 'var(--bg-canvas)',
+                  borderColor: 'var(--border-subtle)',
+                  color: 'var(--app-text)',
+                }}
+              />
+              <button
+                onClick={handleOpenCustomModal}
+                disabled={!customTitle.trim()}
+                className="px-3.5 py-2 text-xs sm:text-sm font-semibold rounded-lg transition-colors cursor-pointer shrink-0 disabled:opacity-40"
+                style={{
+                  backgroundColor: 'var(--app-accent)',
+                  color: '#ffffff',
+                }}
+              >
+                {t.createCustomBtn}
+              </button>
+            </div>
+          </div>
+
+          {/* Categories Pill Bar */}
+          <div className="flex items-center gap-2 overflow-x-auto pb-2 scrollbar-none">
+            {categories.map(cat => {
+              const isActive = selectedCategory === cat.id;
+              return (
+                <button
+                  key={cat.id}
+                  onClick={() => setSelectedCategory(cat.id)}
+                  className="px-3 py-1.5 rounded-lg text-xs font-medium transition-all cursor-pointer flex items-center gap-1.5 border whitespace-nowrap shrink-0"
+                  style={{
+                    backgroundColor: isActive ? 'var(--app-accent-subtle)' : 'var(--bg-surface)',
+                    borderColor: isActive ? 'var(--app-accent)' : 'var(--border-subtle)',
+                    color: isActive ? 'var(--app-accent)' : 'var(--app-text-muted)',
+                  }}
+                >
+                  <span>{cat.icon}</span>
+                  <span>{cat.label}</span>
+                </button>
+              );
+            })}
+
+            {settings.customTopics.map(ct => {
+              const isActive = selectedCategory === ct;
+              return (
+                <button
+                  key={ct}
+                  onClick={() => setSelectedCategory(ct)}
+                  className="px-3 py-1.5 rounded-lg text-xs font-medium transition-all cursor-pointer flex items-center gap-1.5 border whitespace-nowrap shrink-0"
+                  style={{
+                    backgroundColor: isActive ? 'var(--app-accent-subtle)' : 'var(--bg-surface)',
+                    borderColor: isActive ? 'var(--app-accent)' : 'var(--border-subtle)',
+                    color: isActive ? 'var(--app-accent)' : 'var(--app-text-muted)',
+                  }}
+                >
+                  <span>⭐</span>
+                  <span>{ct}</span>
+                </button>
+              );
+            })}
+          </div>
+
+          {/* Feed Content */}
+          {feedLoading ? (
+            <div className="py-12">
+              <LoadingSpinner message={t.feedLoading} />
+            </div>
+          ) : feedError ? (
+            <div className="text-center py-8">
+              <p className="text-xs text-red-400 mb-2">{feedError}</p>
+              <button
+                onClick={() => loadFeed(selectedCategory)}
+                className="text-xs underline font-medium cursor-pointer"
+                style={{ color: 'var(--app-accent)' }}
+              >
+                {t.feedErrorRetry}
+              </button>
+            </div>
+          ) : feedItems.length === 0 ? (
+            <div className="text-center py-12" style={{ color: 'var(--app-text-muted)' }}>
+              <p className="text-xs">მასალა ვერ მოიძებნა</p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3.5">
+              {feedItems.map(item => (
+                <div
+                  key={item.id}
+                  onClick={() => openItemModal(item)}
+                  className="rounded-xl p-4 border transition-all cursor-pointer flex flex-col justify-between hover:border-strong"
+                  style={{
+                    backgroundColor: 'var(--bg-surface)',
+                    borderColor: 'var(--border-subtle)',
+                  }}
+                >
+                  <div>
+                    <div className="flex items-center justify-between text-[11px] mb-2" style={{ color: 'var(--app-text-muted)' }}>
+                      <span className="font-medium truncate max-w-[65%]">{item.source_name}</span>
+                      <span>
+                        {item.reading_time_minutes} {t.minRead}
                       </span>
                     </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        )}
-      </main>
 
-      {/* ── MODAL: Choose Reading Format (Original vs B1 Adapted vs Podcast vs Story) ── */}
+                    <h3 className="font-semibold text-sm leading-snug line-clamp-2 mb-2" style={{ color: 'var(--app-text)' }}>
+                      {item.title}
+                    </h3>
+
+                    <p className="text-xs line-clamp-3 mb-3 leading-relaxed" style={{ color: 'var(--app-text-muted)' }}>
+                      {item.summary}
+                    </p>
+                  </div>
+
+                  <div className="flex items-center justify-between pt-2 border-t text-[11px]" style={{ borderColor: 'var(--border-subtle)' }}>
+                    <div className="flex items-center gap-1.5">
+                      {item.tags.slice(0, 2).map((tag, i) => (
+                        <span
+                          key={i}
+                          className="px-2 py-0.5 rounded text-[10px] border"
+                          style={{
+                            backgroundColor: 'var(--bg-canvas)',
+                            borderColor: 'var(--border-subtle)',
+                            color: 'var(--app-text-muted)',
+                          }}
+                        >
+                          {tag}
+                        </span>
+                      ))}
+                    </div>
+
+                    <span className="font-semibold text-xs flex items-center gap-1" style={{ color: 'var(--app-accent)' }}>
+                      <span>{t.selectAndRead}</span>
+                      <span>→</span>
+                    </span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Format & Level Modal */}
       {selectedItem && (
-        <div
-          className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4"
-          onClick={() => { if (!importing) setSelectedItem(null); }}
-        >
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs">
           <div
-            className="w-full max-w-xl rounded-2xl bg-gray-900 border border-white/15 p-6 shadow-2xl space-y-5"
-            onClick={e => e.stopPropagation()}
+            className="w-full max-w-lg rounded-2xl border p-5 sm:p-6 space-y-4"
+            style={{
+              backgroundColor: 'var(--bg-surface)',
+              borderColor: 'var(--border-strong)',
+            }}
           >
-            <div className="flex items-start justify-between gap-4">
+            <div className="flex items-start justify-between gap-3">
               <div>
-                <span className="text-xs px-2.5 py-0.5 rounded-full bg-purple-500/20 text-purple-300 border border-purple-400/30">
-                  {selectedItem.source_name}
+                <span className="text-[11px] font-semibold uppercase tracking-wider" style={{ color: 'var(--app-accent)' }}>
+                  {t.modalTitle}
                 </span>
-                <h3 className="text-lg font-bold text-white mt-2">{selectedItem.title}</h3>
-                <p className="text-xs text-white/60 mt-1 line-clamp-3">{selectedItem.summary}</p>
+                <h3 className="text-sm sm:text-base font-bold mt-0.5 line-clamp-2" style={{ color: 'var(--app-text)' }}>
+                  {selectedItem.title}
+                </h3>
               </div>
               <button
                 onClick={() => setSelectedItem(null)}
-                disabled={importing}
-                className="text-white/50 hover:text-white p-1 cursor-pointer"
+                className="p-1 rounded-lg text-xs cursor-pointer"
+                style={{ color: 'var(--app-text-muted)' }}
               >
                 ✕
               </button>
             </div>
 
-            {/* Step 1: Choose Format */}
-            <div className="space-y-2">
-              <label className="text-xs font-semibold uppercase tracking-wider text-white/60">
+            {/* Step 1: Format */}
+            <div className="space-y-1.5">
+              <label className="text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--app-text-muted)' }}>
                 {t.step1Format}
               </label>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+              <div className="grid grid-cols-2 gap-2">
                 <button
                   type="button"
                   onClick={() => setImportMode('adapted')}
-                  className={`p-3 rounded-xl border text-left transition-all cursor-pointer ${
-                    importMode === 'adapted'
-                      ? 'bg-purple-600/25 border-purple-400 text-white'
-                      : 'bg-white/5 border-white/10 text-white/70 hover:bg-white/10'
-                  }`}
+                  className="p-2.5 rounded-xl border text-left transition-all cursor-pointer"
+                  style={{
+                    backgroundColor: importMode === 'adapted' ? 'var(--app-accent-subtle)' : 'var(--bg-canvas)',
+                    borderColor: importMode === 'adapted' ? 'var(--app-accent)' : 'var(--border-subtle)',
+                  }}
                 >
-                  <div className="font-semibold text-sm flex items-center gap-1.5">
-                    <span>✨</span>
-                    <span>{t.formatAdaptedTitle}</span>
+                  <div className="text-xs font-semibold" style={{ color: importMode === 'adapted' ? 'var(--app-accent)' : 'var(--app-text)' }}>
+                    {t.formatAdaptedTitle}
                   </div>
-                  <p className="text-[11px] text-white/60 mt-1">
+                  <div className="text-[10px] mt-0.5" style={{ color: 'var(--app-text-muted)' }}>
                     {t.formatAdaptedDesc}
-                  </p>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => setImportMode('original')}
-                  className={`p-3 rounded-xl border text-left transition-all cursor-pointer ${
-                    importMode === 'original'
-                      ? 'bg-purple-600/25 border-purple-400 text-white'
-                      : 'bg-white/5 border-white/10 text-white/70 hover:bg-white/10'
-                  }`}
-                >
-                  <div className="font-semibold text-sm flex items-center gap-1.5">
-                    <span>📖</span>
-                    <span>{t.formatOriginalTitle}</span>
                   </div>
-                  <p className="text-[11px] text-white/60 mt-1">
-                    {t.formatOriginalDesc}
-                  </p>
                 </button>
 
                 <button
                   type="button"
                   onClick={() => setImportMode('podcast')}
-                  className={`p-3 rounded-xl border text-left transition-all cursor-pointer ${
-                    importMode === 'podcast'
-                      ? 'bg-purple-600/25 border-purple-400 text-white'
-                      : 'bg-white/5 border-white/10 text-white/70 hover:bg-white/10'
-                  }`}
+                  className="p-2.5 rounded-xl border text-left transition-all cursor-pointer"
+                  style={{
+                    backgroundColor: importMode === 'podcast' ? 'var(--app-accent-subtle)' : 'var(--bg-canvas)',
+                    borderColor: importMode === 'podcast' ? 'var(--app-accent)' : 'var(--border-subtle)',
+                  }}
                 >
-                  <div className="font-semibold text-sm flex items-center gap-1.5">
-                    <span>🎙️</span>
-                    <span>{t.formatPodcastTitle}</span>
+                  <div className="text-xs font-semibold" style={{ color: importMode === 'podcast' ? 'var(--app-accent)' : 'var(--app-text)' }}>
+                    {t.formatPodcastTitle}
                   </div>
-                  <p className="text-[11px] text-white/60 mt-1">
+                  <div className="text-[10px] mt-0.5" style={{ color: 'var(--app-text-muted)' }}>
                     {t.formatPodcastDesc}
-                  </p>
+                  </div>
                 </button>
 
                 <button
                   type="button"
                   onClick={() => setImportMode('story')}
-                  className={`p-3 rounded-xl border text-left transition-all cursor-pointer ${
-                    importMode === 'story'
-                      ? 'bg-purple-600/25 border-purple-400 text-white'
-                      : 'bg-white/5 border-white/10 text-white/70 hover:bg-white/10'
-                  }`}
+                  className="p-2.5 rounded-xl border text-left transition-all cursor-pointer"
+                  style={{
+                    backgroundColor: importMode === 'story' ? 'var(--app-accent-subtle)' : 'var(--bg-canvas)',
+                    borderColor: importMode === 'story' ? 'var(--app-accent)' : 'var(--border-subtle)',
+                  }}
                 >
-                  <div className="font-semibold text-sm flex items-center gap-1.5">
-                    <span>📖</span>
-                    <span>{t.formatStoryTitle}</span>
+                  <div className="text-xs font-semibold" style={{ color: importMode === 'story' ? 'var(--app-accent)' : 'var(--app-text)' }}>
+                    {t.formatStoryTitle}
                   </div>
-                  <p className="text-[11px] text-white/60 mt-1">
+                  <div className="text-[10px] mt-0.5" style={{ color: 'var(--app-text-muted)' }}>
                     {t.formatStoryDesc}
-                  </p>
+                  </div>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setImportMode('original')}
+                  className="p-2.5 rounded-xl border text-left transition-all cursor-pointer"
+                  style={{
+                    backgroundColor: importMode === 'original' ? 'var(--app-accent-subtle)' : 'var(--bg-canvas)',
+                    borderColor: importMode === 'original' ? 'var(--app-accent)' : 'var(--border-subtle)',
+                  }}
+                >
+                  <div className="text-xs font-semibold" style={{ color: importMode === 'original' ? 'var(--app-accent)' : 'var(--app-text)' }}>
+                    {t.formatOriginalTitle}
+                  </div>
+                  <div className="text-[10px] mt-0.5" style={{ color: 'var(--app-text-muted)' }}>
+                    {t.formatOriginalDesc}
+                  </div>
                 </button>
               </div>
             </div>
 
-            {/* Step 2: Choose CEFR Level (when not Original) */}
+            {/* Step 2: Level */}
             {importMode !== 'original' && (
-              <div className="space-y-2">
-                <label className="text-xs font-semibold uppercase tracking-wider text-white/60">
+              <div className="space-y-1.5">
+                <label className="text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--app-text-muted)' }}>
                   {t.step2Cefr}
                 </label>
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                <div className="grid grid-cols-4 gap-2">
                   {cefrLevels.map(item => (
                     <button
                       key={item.level}
                       type="button"
                       onClick={() => setCefrLevel(item.level)}
-                      className={`p-2.5 rounded-xl border text-center transition-all cursor-pointer ${
-                        cefrLevel === item.level
-                          ? 'bg-pink-600/25 border-pink-400 text-white font-semibold'
-                          : 'bg-white/5 border-white/10 text-white/70 hover:bg-white/10'
-                      }`}
+                      className="p-2 rounded-xl border text-center transition-all cursor-pointer"
+                      style={{
+                        backgroundColor: cefrLevel === item.level ? 'var(--app-accent-subtle)' : 'var(--bg-canvas)',
+                        borderColor: cefrLevel === item.level ? 'var(--app-accent)' : 'var(--border-subtle)',
+                      }}
                     >
-                      <div className="text-sm">{item.level}</div>
-                      <div className="text-[10px] text-white/50 truncate">{item.desc}</div>
+                      <div className="text-xs font-bold" style={{ color: cefrLevel === item.level ? 'var(--app-accent)' : 'var(--app-text)' }}>
+                        {item.level}
+                      </div>
+                      <div className="text-[9px] truncate" style={{ color: 'var(--app-text-muted)' }}>
+                        {item.desc}
+                      </div>
                     </button>
                   ))}
                 </div>
 
                 {(importMode === 'adapted' || importMode === 'podcast') && (
-                  <label className="flex items-center gap-2 pt-1 text-xs text-white/70 cursor-pointer">
+                  <label className="flex items-center gap-2 pt-1 text-xs cursor-pointer" style={{ color: 'var(--app-text-muted)' }}>
                     <input
                       type="checkbox"
                       checked={includeOriginal}
                       onChange={e => setIncludeOriginal(e.target.checked)}
-                      className="rounded border-white/20"
+                      className="rounded"
                     />
                     <span>{t.includeOriginalCheckbox}</span>
                   </label>
@@ -733,18 +741,22 @@ export default function LibraryPage() {
             )}
 
             {importError && (
-              <p className="text-xs text-red-400 bg-red-500/10 border border-red-500/20 rounded-xl p-3">
+              <p className="text-xs text-red-400 bg-red-500/10 border border-red-500/20 rounded-xl p-2.5">
                 {importError}
               </p>
             )}
 
             {/* Actions */}
-            <div className="flex items-center justify-end gap-3 pt-2">
+            <div className="flex items-center justify-end gap-2.5 pt-2">
               <button
                 type="button"
                 onClick={() => setSelectedItem(null)}
                 disabled={importing}
-                className="px-4 py-2.5 text-sm rounded-xl border border-white/15 hover:bg-white/10 transition-colors cursor-pointer disabled:opacity-50"
+                className="px-3.5 py-2 text-xs font-medium rounded-xl border transition-colors cursor-pointer"
+                style={{
+                  borderColor: 'var(--border-subtle)',
+                  color: 'var(--app-text-muted)',
+                }}
               >
                 {t.cancel}
               </button>
@@ -752,37 +764,35 @@ export default function LibraryPage() {
                 type="button"
                 onClick={handleConfirmImport}
                 disabled={importing}
-                className="px-5 py-2.5 text-sm font-semibold rounded-xl bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 transition-all shadow-lg shadow-purple-500/25 cursor-pointer disabled:opacity-50 flex items-center gap-2"
+                className="px-4 py-2 text-xs font-semibold rounded-xl transition-all cursor-pointer flex items-center gap-2"
+                style={{
+                  backgroundColor: 'var(--app-accent)',
+                  color: '#ffffff',
+                }}
               >
                 {importing ? (
                   <>
-                    <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                    <div className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
                     <span>{t.btnPreparing}</span>
                   </>
                 ) : (
-                  <>
-                    <span>🚀</span>
-                    <span>
-                      {importMode === 'original'
-                        ? t.btnOpenOriginal
-                        : importMode === 'podcast'
-                        ? t.btnOpenPodcast.replace('{level}', cefrLevel)
-                        : importMode === 'story'
-                        ? t.btnOpenStory.replace('{level}', cefrLevel)
-                        : t.btnOpenAdapted.replace('{level}', cefrLevel)}
-                    </span>
-                  </>
+                  <span>
+                    {importMode === 'original'
+                      ? t.btnOpenOriginal
+                      : importMode === 'podcast'
+                      ? t.btnOpenPodcast.replace('{level}', cefrLevel)
+                      : importMode === 'story'
+                      ? t.btnOpenStory.replace('{level}', cefrLevel)
+                      : t.btnOpenAdapted.replace('{level}', cefrLevel)}
+                  </span>
                 )}
               </button>
             </div>
           </div>
         </div>
       )}
-      {/* Global Settings Modal */}
-      <SettingsModal
-        isOpen={settings.isSettingsOpen}
-        onClose={settings.closeSettings}
-      />
-    </div>
+
+      <SettingsModal isOpen={settings.isSettingsOpen} onClose={settings.closeSettings} />
+    </AppLayout>
   );
 }

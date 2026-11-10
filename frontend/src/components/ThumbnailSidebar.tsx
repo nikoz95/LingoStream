@@ -1,4 +1,5 @@
 import { useCallback, useRef, useState, useEffect } from 'react';
+import { useLanguage } from '../lib/i18n';
 import type { PDFDocumentProxy } from 'pdfjs-dist';
 
 interface ThumbnailSidebarProps {
@@ -16,6 +17,7 @@ export default function ThumbnailSidebar({
   onPageClick,
   visible,
 }: ThumbnailSidebarProps) {
+  const { t } = useLanguage();
   const [showThumbnails, setShowThumbnails] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -42,11 +44,11 @@ export default function ThumbnailSidebar({
         className={`absolute left-0 top-1/2 -translate-y-1/2 z-30 p-1.5 rounded-r-xl 
           transition-all hover:bg-white/10
           ${showThumbnails ? 'bg-white/15' : 'bg-white/5'}`}
-        title={showThumbnails ? 'Hide thumbnails' : 'Show thumbnails'}
+        title={showThumbnails ? t.readerHideThumbnails : t.readerShowThumbnails}
         style={{ writingMode: 'vertical-rl' }}
       >
         <span className="text-[10px] opacity-50 tracking-wider">
-          {showThumbnails ? '◀ HIDE' : '▶ PAGES'}
+          {showThumbnails ? t.readerHide : t.readerPages}
         </span>
       </button>
 

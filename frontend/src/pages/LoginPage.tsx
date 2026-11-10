@@ -1,15 +1,13 @@
 import { useState, type FormEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../lib/auth';
+import { useLanguage } from '../lib/i18n';
+import LanguageToggle from '../components/LanguageToggle';
 import LoadingSpinner from '../components/LoadingSpinner';
-
-const BACKGROUND_BLOBS = [
-  'absolute -top-40 -right-40 w-96 h-96 rounded-full bg-purple-500/10 blur-3xl',
-  'absolute -bottom-40 -left-40 w-96 h-96 rounded-full bg-pink-500/10 blur-3xl',
-];
 
 export default function LoginPage() {
   const { login, register } = useAuth();
+  const { t, lang } = useLanguage();
   const navigate = useNavigate();
   const [isRegister, setIsRegister] = useState(false);
   const [email, setEmail] = useState('');
@@ -30,42 +28,71 @@ export default function LoginPage() {
       }
       navigate('/library', { replace: true });
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Authentication failed');
+      setError(err instanceof Error ? err.message : (lang === 'ka' ? 'ავტორიზაცია ვერ მოხერხდა' : 'Authentication failed'));
     } finally {
       setLoading(false);
     }
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-gray-900 via-purple-900 to-gray-900 flex items-center justify-center p-4">
-      {/* Background decorative elements */}
-      <div className="fixed inset-0 overflow-hidden pointer-events-none">
-        {BACKGROUND_BLOBS.map((className, i) => (
-          <div key={i} className={className} />
-        ))}
+    <div
+      className="min-h-screen flex items-center justify-center p-4 transition-colors"
+      style={{ backgroundColor: 'var(--bg-canvas)' }}
+    >
+      <div className="absolute top-4 right-4">
+        <LanguageToggle />
       </div>
 
-      <div className="relative w-full max-w-md">
-        {/* Logo / Brand */}
+      <div className="w-full max-w-sm">
+        {/* Brand */}
         <div className="text-center mb-8">
-          <h1 className="text-4xl font-bold tracking-tight bg-gradient-to-r from-purple-400 to-pink-400 bg-clip-text text-transparent">
+          <div
+            className="inline-flex items-center justify-center w-12 h-12 rounded-xl mb-3 border"
+            style={{
+              backgroundColor: 'var(--bg-surface)',
+              borderColor: 'var(--border-subtle)',
+              color: 'var(--app-accent)',
+            }}
+          >
+            <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"
+              />
+            </svg>
+          </div>
+          <h1 className="text-2xl font-bold tracking-tight" style={{ color: 'var(--app-text)' }}>
             LingoStream
           </h1>
-          <p className="mt-2 text-white/50 text-sm">
-            AI-Powered Reading for Language Acquisition
+          <p className="mt-1 text-xs" style={{ color: 'var(--app-text-muted)' }}>
+            {lang === 'ka' ? 'ინტელექტუალური კითხვა და ენის შესწავლა' : 'AI-Powered Reading & Language Practice'}
           </p>
         </div>
 
         {/* Card */}
-        <div className="glass rounded-2xl p-8 shadow-xl">
-          <h2 className="text-xl font-semibold text-white mb-6">
-            {isRegister ? 'Create Account' : 'Sign In'}
+        <div
+          className="rounded-2xl p-6 sm:p-7 border"
+          style={{
+            backgroundColor: 'var(--bg-surface)',
+            borderColor: 'var(--border-subtle)',
+          }}
+        >
+          <h2 className="text-base font-semibold mb-5" style={{ color: 'var(--app-text)' }}>
+            {isRegister
+              ? (lang === 'ka' ? 'ახალი ანგარიშის შექმნა' : 'Create an Account')
+              : (lang === 'ka' ? 'სისტემაში შესვლა' : 'Sign in to LingoStream')}
           </h2>
 
           <form onSubmit={handleSubmit} className="space-y-4">
             <div>
-              <label htmlFor="email" className="block text-sm font-medium text-white/70 mb-1.5">
-                Email
+              <label
+                htmlFor="email"
+                className="block text-xs font-medium mb-1.5"
+                style={{ color: 'var(--app-text-muted)' }}
+              >
+                {lang === 'ka' ? 'ელ-ფოსტა' : 'Email'}
               </label>
               <input
                 id="email"
@@ -74,16 +101,22 @@ export default function LoginPage() {
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 placeholder="you@example.com"
-                className="w-full px-4 py-2.5 rounded-xl border border-white/15 bg-white/5 
-                  text-white placeholder:text-white/30 
-                  focus:outline-none focus:ring-2 focus:ring-purple-500/40 focus:border-purple-500/50
-                  transition-all duration-200"
+                className="w-full px-3.5 py-2.5 rounded-xl border text-sm transition-colors focus:outline-none"
+                style={{
+                  backgroundColor: 'var(--bg-canvas)',
+                  borderColor: 'var(--border-subtle)',
+                  color: 'var(--app-text)',
+                }}
               />
             </div>
 
             <div>
-              <label htmlFor="password" className="block text-sm font-medium text-white/70 mb-1.5">
-                Password
+              <label
+                htmlFor="password"
+                className="block text-xs font-medium mb-1.5"
+                style={{ color: 'var(--app-text-muted)' }}
+              >
+                {lang === 'ka' ? 'პაროლი' : 'Password'}
               </label>
               <input
                 id="password"
@@ -92,16 +125,25 @@ export default function LoginPage() {
                 minLength={6}
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                placeholder="Min. 6 characters"
-                className="w-full px-4 py-2.5 rounded-xl border border-white/15 bg-white/5 
-                  text-white placeholder:text-white/30 
-                  focus:outline-none focus:ring-2 focus:ring-purple-500/40 focus:border-purple-500/50
-                  transition-all duration-200"
+                placeholder={lang === 'ka' ? 'მინიმუმ 6 სიმბოლო' : 'Min. 6 characters'}
+                className="w-full px-3.5 py-2.5 rounded-xl border text-sm transition-colors focus:outline-none"
+                style={{
+                  backgroundColor: 'var(--bg-canvas)',
+                  borderColor: 'var(--border-subtle)',
+                  color: 'var(--app-text)',
+                }}
               />
             </div>
 
             {error && (
-              <div className="px-4 py-3 rounded-xl bg-red-500/10 border border-red-500/20 text-red-400 text-sm">
+              <div
+                className="text-xs p-3 rounded-xl border"
+                style={{
+                  backgroundColor: 'rgba(239, 68, 68, 0.1)',
+                  borderColor: 'rgba(239, 68, 68, 0.25)',
+                  color: '#ef4444',
+                }}
+              >
                 {error}
               </div>
             )}
@@ -109,32 +151,36 @@ export default function LoginPage() {
             <button
               type="submit"
               disabled={loading}
-              className="w-full py-2.5 rounded-xl bg-white/20 hover:bg-white/30 text-white font-medium
-                disabled:opacity-50 disabled:cursor-not-allowed
-                transition-all duration-200 shadow-sm"
+              className="w-full py-2.5 px-4 rounded-xl text-sm font-semibold transition-all cursor-pointer flex items-center justify-center gap-2 mt-2"
+              style={{
+                backgroundColor: 'var(--app-accent)',
+                color: '#ffffff',
+                opacity: loading ? 0.7 : 1,
+              }}
             >
-              {loading ? (
-                <LoadingSpinner
-                  message={isRegister ? 'Creating account...' : 'Signing in...'}
-                  light
-                  inline
-                />
-              ) : (
-                isRegister ? 'Create Account' : 'Sign In'
-              )}
+              {loading && <LoadingSpinner message="" />}
+              <span>
+                {isRegister
+                  ? (lang === 'ka' ? 'რეგისტრაცია' : 'Create Account')
+                  : (lang === 'ka' ? 'შესვლა' : 'Sign In')}
+              </span>
             </button>
           </form>
 
-          <div className="mt-6 text-center">
+          {/* Toggle register / login */}
+          <div className="mt-5 pt-4 text-center border-t" style={{ borderColor: 'var(--border-subtle)' }}>
             <button
               type="button"
               onClick={() => {
                 setIsRegister(!isRegister);
                 setError('');
               }}
-              className="text-sm text-white/50 hover:text-white transition-colors underline underline-offset-2"
+              className="text-xs transition-colors cursor-pointer"
+              style={{ color: 'var(--app-text-muted)' }}
             >
-              {isRegister ? 'Already have an account? Sign in' : "Don't have an account? Create one"}
+              {isRegister
+                ? (lang === 'ka' ? 'უკვე გაქვს ანგარიში? შესვლა' : 'Already have an account? Sign In')
+                : (lang === 'ka' ? 'ახალი ხარ? გაიარე რეგისტრაცია' : "Don't have an account? Sign Up")}
             </button>
           </div>
         </div>
