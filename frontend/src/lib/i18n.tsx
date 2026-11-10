@@ -265,8 +265,8 @@ const translations: Record<UILanguage, Translations> = {
   ka: {
     // Navigation & General
     navLibrary: 'ბიბლიოთეკა',
-    navWriting: 'Writing',
-    navVocabulary: 'Vocabulary',
+    navWriting: 'წერა',
+    navVocabulary: 'ლექსიკონი',
     navSignOut: 'გასვლა',
     back: 'უკან',
     loading: 'იტვირთება...',
@@ -353,7 +353,7 @@ const translations: Record<UILanguage, Translations> = {
 
     // Writing Page
     writingTitle: 'Writing Studio',
-    writingSubtitle: 'თავისუფალი წერა, ცოცხალი დიალოგი, გრამატიკაში ჩაძიება და Vocabulary-ს შევსება',
+    writingSubtitle: 'თავისუფალი წერა, ცოცხალი დიალოგი, გრამატიკაში ჩაძიება და ლექსიკონის შევსება',
     writingTabFree: 'თავისუფალი წერა',
     writingTabChat: 'AI როლური დიალოგი',
     writingTabHistory: 'თემები & სუსტი წერტილები',
@@ -375,9 +375,9 @@ const translations: Record<UILanguage, Translations> = {
     writingDeepDiveBtn: '🔍 რატომ? / ჩაეძიე',
     writingDeepDivePlaceholder: 'ჩაეკითხე შენი სიტყვებით (მაგ: აქ Present Perfect რატომ არ წავა?)...',
     writingDeepDiveAsk: 'ამიხსენი',
-    writingVocabularyTitle: 'რეკომენდებული სიტყვები და ფრაზები Vocabulary-სთვის',
-    writingSavedToVocab: '✓ შენახულია Vocabulary-ში',
-    writingSaveToVocab: '+ Save to Vocabulary',
+    writingVocabularyTitle: 'რეკომენდებული სიტყვები და ფრაზები ლექსიკონისთვის',
+    writingSavedToVocab: '✓ შენახულია ლექსიკონში',
+    writingSaveToVocab: '+ ლექსიკონში შენახვა',
     writingConnectorsTitle: 'სასაუბრო კონექტორები (დააკლიკე ჩასასმელად)',
     writingChatScenarioSelect: 'აირჩიე სცენარი',
     writingChatScenarioCustom: '✨ ან შექმენი შენი სცენარი:',
