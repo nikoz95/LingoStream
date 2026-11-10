@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   listBooks,
@@ -12,6 +12,8 @@ import {
   type DiscoverMode,
   type CefrLevel,
 } from '../lib/api';
+import { useLanguage, type Translations } from '../lib/i18n';
+import LanguageToggle from '../components/LanguageToggle';
 import LoadingSpinner from '../components/LoadingSpinner';
 
 const ACCEPTED_TYPES = '.pdf,.epub';
@@ -30,28 +32,29 @@ interface CategoryOption {
   group: 'tech' | 'general' | 'spoken';
 }
 
-const DISCOVER_CATEGORIES: CategoryOption[] = [
-  { id: 'ai', label: 'AI & LLMs', icon: '🤖', group: 'tech' },
-  { id: 'dotnet', label: '.NET & C#', icon: '🟣', group: 'tech' },
-  { id: 'python', label: 'Python', icon: '🐍', group: 'tech' },
-  { id: 'architecture', label: 'System Design', icon: '🏗️', group: 'tech' },
-  { id: 'world', label: 'World & News', icon: '🌍', group: 'general' },
-  { id: 'psychology', label: 'Psychology & Habits', icon: '🧠', group: 'general' },
-  { id: 'science', label: 'Science & Space', icon: '🔬', group: 'general' },
-  { id: 'culture', label: 'Culture & Life', icon: '🎬', group: 'general' },
-  { id: 'podcasts', label: 'Podcasts & Discussions', icon: '🎙️', group: 'spoken' },
-  { id: 'stories', label: 'მოთხრობები (Stories)', icon: '📖', group: 'spoken' },
+const getCategories = (t: Translations): CategoryOption[] => [
+  { id: 'ai', label: t.catAi, icon: '🤖', group: 'tech' },
+  { id: 'dotnet', label: t.catDotnet, icon: '🟣', group: 'tech' },
+  { id: 'python', label: t.catPython, icon: '🐍', group: 'tech' },
+  { id: 'architecture', label: t.catArchitecture, icon: '🏗️', group: 'tech' },
+  { id: 'world', label: t.catWorld, icon: '🌍', group: 'general' },
+  { id: 'psychology', label: t.catPsychology, icon: '🧠', group: 'general' },
+  { id: 'science', label: t.catScience, icon: '🔬', group: 'general' },
+  { id: 'culture', label: t.catCulture, icon: '🎬', group: 'general' },
+  { id: 'podcasts', label: t.catPodcasts, icon: '🎙️', group: 'spoken' },
+  { id: 'stories', label: t.catStories, icon: '📖', group: 'spoken' },
 ];
 
-const CEFR_LEVELS: { level: CefrLevel; label: string; desc: string }[] = [
-  { level: 'A2', label: 'A2 (Pre-Intermediate)', desc: 'მარტივი ყოველდღიური ენა' },
-  { level: 'B1', label: 'B1 (Intermediate)', desc: 'რეკომენდებული — ბუნებრივი და გასაგები' },
-  { level: 'B2', label: 'B2 (Upper-Intermediate)', desc: 'უფრო მდიდარი კონსტრუქციები' },
-  { level: 'C1', label: 'C1 (Advanced)', desc: 'პროფესიული და აკადემიური სტილი' },
+const getCefrLevels = (t: Translations): { level: CefrLevel; label: string; desc: string }[] => [
+  { level: 'A2', label: 'A2 (Pre-Intermediate)', desc: t.cefrA2Desc },
+  { level: 'B1', label: 'B1 (Intermediate)', desc: t.cefrB1Desc },
+  { level: 'B2', label: 'B2 (Upper-Intermediate)', desc: t.cefrB2Desc },
+  { level: 'C1', label: 'C1 (Advanced)', desc: t.cefrC1Desc },
 ];
 
 export default function LibraryPage() {
   const navigate = useNavigate();
+  const { t, lang } = useLanguage();
   const [activeTab, setActiveTab] = useState<'library' | 'discover'>('library');
   const [books, setBooks] = useState<BookListItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -75,6 +78,9 @@ export default function LibraryPage() {
 
   // Custom prompt generator state
   const [customTitle, setCustomTitle] = useState('');
+
+  const categories = useMemo(() => getCategories(t), [t]);
+  const cefrLevels = useMemo(() => getCefrLevels(t), [t]);
 
   const fetchBooks = useCallback(async () => {
     try {
@@ -143,7 +149,7 @@ export default function LibraryPage() {
   }, []);
 
   const handleDelete = useCallback(async (bookId: number, title: string) => {
-    if (!window.confirm(`Delete "${title}"?`)) return;
+    if (!window.confirm(`${t.deleteBookConfirm}\n"${title}"`)) return;
 
     setDeleting(bookId);
     try {
@@ -154,7 +160,7 @@ export default function LibraryPage() {
     } finally {
       setDeleting(null);
     }
-  }, []);
+  }, [t.deleteBookConfirm]);
 
   const handleLogout = useCallback(async () => {
     try {
@@ -256,12 +262,13 @@ export default function LibraryPage() {
           LingoStream
         </h1>
         <div className="flex items-center gap-3">
+          <LanguageToggle />
           <button
             onClick={() => navigate('/writing')}
             className="px-4 py-2 text-sm rounded-xl border border-purple-400/30 bg-purple-500/10 hover:bg-purple-500/20 hover:border-purple-400/50 transition-all duration-200 flex items-center gap-2 cursor-pointer"
           >
             <span>✍️</span>
-            <span>Writing</span>
+            <span>{t.navWriting}</span>
           </button>
           <button
             onClick={() => navigate('/vocabulary')}
@@ -271,13 +278,13 @@ export default function LibraryPage() {
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
                 d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
             </svg>
-            Vocabulary
+            <span>{t.navVocabulary}</span>
           </button>
           <button
             onClick={handleLogout}
             className="px-4 py-2 text-sm rounded-xl border border-white/15 hover:bg-white/10 transition-colors cursor-pointer"
           >
-            Sign Out
+            {t.navSignOut}
           </button>
         </div>
       </header>
@@ -295,7 +302,7 @@ export default function LibraryPage() {
               }`}
             >
               <span>📚</span>
-              <span>ჩემი ბიბლიოთეკა ({books.length})</span>
+              <span>{t.myLibrary} ({books.length})</span>
             </button>
             <button
               onClick={() => setActiveTab('discover')}
@@ -306,7 +313,7 @@ export default function LibraryPage() {
               }`}
             >
               <span>🌐</span>
-              <span>აღმოაჩინე მასალა (B1 / Tech / Podcasts / Stories)</span>
+              <span>{t.discoverContent}</span>
             </button>
           </div>
         </div>
@@ -322,10 +329,10 @@ export default function LibraryPage() {
                       d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
                   </svg>
                   <div className="text-sm">
-                    <span className="text-purple-400 font-medium">Click to upload</span>
-                    <span className="opacity-50"> or drag and drop</span>
+                    <span className="text-purple-400 font-medium">{t.clickToUpload}</span>
+                    <span className="opacity-50"> {t.dragAndDrop}</span>
                   </div>
-                  <span className="text-xs opacity-40">PDF or EPUB files only</span>
+                  <span className="text-xs opacity-40">{t.pdfOrEpub}</span>
                 </div>
                 <input
                   ref={ref => { if (ref) fileRef[1](ref); }}
@@ -339,7 +346,7 @@ export default function LibraryPage() {
 
               {upload.uploading && (
                 <div className="mt-4">
-                  <LoadingSpinner message="Uploading and processing..." />
+                  <LoadingSpinner message={t.uploadingAndProcessing} />
                 </div>
               )}
               {upload.error && (
@@ -353,16 +360,15 @@ export default function LibraryPage() {
             {/* Books grid */}
             {books.length === 0 ? (
               <div className="text-center py-16">
-                <p className="text-lg opacity-50">Your library is empty</p>
+                <p className="text-lg opacity-50">{t.libraryEmpty}</p>
                 <p className="text-sm opacity-40 mt-2">
-                  Upload a PDF/EPUB or switch to{' '}
+                  {t.libraryEmptyDesc}{' '}
                   <button
                     onClick={() => setActiveTab('discover')}
                     className="text-purple-400 underline hover:text-purple-300 cursor-pointer"
                   >
-                    🌐 აღმოაჩინე მასალა
-                  </button>{' '}
-                  to read modern B1 articles, podcasts, and stories!
+                    🌐 {t.discoverContent}
+                  </button>
                 </p>
               </div>
             ) : (
@@ -384,7 +390,7 @@ export default function LibraryPage() {
                         onClick={e => { e.stopPropagation(); handleDelete(book.id, book.title); }}
                         disabled={deleting === book.id}
                         className="ml-2 p-1.5 rounded-lg opacity-0 group-hover:opacity-100 hover:bg-red-500/20 transition-all disabled:opacity-50 cursor-pointer"
-                        title="Delete book"
+                        title={t.deleteBookTitle}
                       >
                         {deleting === book.id ? (
                           <div className="w-4 h-4 border-2 border-red-400/30 border-t-red-400 rounded-full animate-spin" />
@@ -400,7 +406,7 @@ export default function LibraryPage() {
                     <div className="flex items-center gap-3 text-xs opacity-40">
                       <span className="capitalize">{book.language}</span>
                       <span>·</span>
-                      <span>{book.total_chapters} chapters</span>
+                      <span>{book.total_chapters} {t.booksCount}</span>
                       {book.status === 'ready' && (
                         <>
                           <span>·</span>
@@ -421,10 +427,10 @@ export default function LibraryPage() {
               <div>
                 <h2 className="text-lg font-semibold text-white flex items-center gap-2">
                   <span>✨</span>
-                  <span>თანამედროვე სტატიები, პოდკასტები და მოთხრობები</span>
+                  <span>{t.discoverBannerTitle}</span>
                 </h2>
                 <p className="text-xs text-white/60 mt-1">
-                  აირჩიეთ ნებისმიერი მასალა და გახსენით <strong>ორიგინალში</strong>, მოარგეთ <strong>B1/B2 დონეს</strong>, ან გადააქციეთ <strong>სასაუბრო პოდკასტ-დიალოგად</strong>.
+                  {t.discoverBannerDesc}
                 </p>
               </div>
               <div className="flex items-center gap-2 w-full lg:w-auto">
@@ -433,7 +439,7 @@ export default function LibraryPage() {
                   value={customTitle}
                   onChange={e => setCustomTitle(e.target.value)}
                   onKeyDown={e => { if (e.key === 'Enter') handleOpenCustomModal(); }}
-                  placeholder="ან ჩაწერეთ თქვენი თემა / მოთხრობის იდეა..."
+                  placeholder={t.customTopicPlaceholder}
                   className="flex-1 lg:w-72 px-3.5 py-2 text-sm rounded-xl bg-black/30 border border-white/15 focus:outline-none focus:border-purple-400 text-white placeholder-white/40"
                 />
                 <button
@@ -441,7 +447,7 @@ export default function LibraryPage() {
                   disabled={!customTitle.trim()}
                   className="px-4 py-2 text-sm font-medium rounded-xl bg-purple-600 hover:bg-purple-500 disabled:opacity-40 transition-colors cursor-pointer whitespace-nowrap"
                 >
-                  + შექმნა
+                  {t.createCustomBtn}
                 </button>
               </div>
             </div>
@@ -449,7 +455,7 @@ export default function LibraryPage() {
             {/* Category Pills */}
             <div className="space-y-2.5">
               <div className="flex flex-wrap gap-2">
-                {DISCOVER_CATEGORIES.map(cat => {
+                {categories.map(cat => {
                   const isActive = selectedCategory === cat.id;
                   return (
                     <button
@@ -472,7 +478,7 @@ export default function LibraryPage() {
             {/* Feed Items Grid */}
             {feedLoading ? (
               <div className="py-16 flex justify-center">
-                <LoadingSpinner message="მოაქვს უახლესი მასალები..." />
+                <LoadingSpinner message={t.feedLoading} />
               </div>
             ) : feedError ? (
               <div className="glass rounded-2xl p-8 text-center border border-red-500/20">
@@ -481,7 +487,7 @@ export default function LibraryPage() {
                   onClick={() => loadFeed(selectedCategory)}
                   className="px-4 py-2 text-xs rounded-xl bg-white/10 hover:bg-white/20 cursor-pointer"
                 >
-                  თავიდან ცდა
+                  {t.feedErrorRetry}
                 </button>
               </div>
             ) : (
@@ -498,7 +504,7 @@ export default function LibraryPage() {
                           {item.source_name}
                         </span>
                         <span className="text-white/40 whitespace-nowrap">
-                          ⏱ {item.reading_time_minutes} წთ
+                          ⏱ {item.reading_time_minutes} {t.minRead}
                         </span>
                       </div>
 
@@ -523,7 +529,7 @@ export default function LibraryPage() {
                         ))}
                       </div>
                       <span className="text-xs font-medium text-purple-400 group-hover:translate-x-0.5 transition-transform whitespace-nowrap">
-                        არჩევა & კითხვა →
+                        {t.selectAndRead}
                       </span>
                     </div>
                   </div>
@@ -564,7 +570,7 @@ export default function LibraryPage() {
             {/* Step 1: Choose Format */}
             <div className="space-y-2">
               <label className="text-xs font-semibold uppercase tracking-wider text-white/60">
-                1. აირჩიეთ წაკითხვის ფორმატი:
+                {t.step1Format}
               </label>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                 <button
@@ -578,10 +584,10 @@ export default function LibraryPage() {
                 >
                   <div className="font-semibold text-sm flex items-center gap-1.5">
                     <span>✨</span>
-                    <span>დონეზე მორგება (Adapt)</span>
+                    <span>{t.formatAdaptedTitle}</span>
                   </div>
                   <p className="text-[11px] text-white/60 mt-1">
-                    გაამარტივებს რთულ წინადადებებს, შეინარჩუნებს აზრს და საჭირო ტერმინებს.
+                    {t.formatAdaptedDesc}
                   </p>
                 </button>
 
@@ -596,10 +602,10 @@ export default function LibraryPage() {
                 >
                   <div className="font-semibold text-sm flex items-center gap-1.5">
                     <span>📖</span>
-                    <span>ორიგინალი (Original)</span>
+                    <span>{t.formatOriginalTitle}</span>
                   </div>
                   <p className="text-[11px] text-white/60 mt-1">
-                    სტატიის ორიგინალი ვერსია AI გადამუშავების გარეშე.
+                    {t.formatOriginalDesc}
                   </p>
                 </button>
 
@@ -614,10 +620,10 @@ export default function LibraryPage() {
                 >
                   <div className="font-semibold text-sm flex items-center gap-1.5">
                     <span>🎙️</span>
-                    <span>სასაუბრო პოდკასტი (Dialogue)</span>
+                    <span>{t.formatPodcastTitle}</span>
                   </div>
                   <p className="text-[11px] text-white/60 mt-1">
-                    თემას გადააქცევს 2 ადამიანის ცოცხალ დიალოგად სასაუბრო ფრაზებით.
+                    {t.formatPodcastDesc}
                   </p>
                 </button>
 
@@ -632,10 +638,10 @@ export default function LibraryPage() {
                 >
                   <div className="font-semibold text-sm flex items-center gap-1.5">
                     <span>📖</span>
-                    <span>მოთხრობა (Short Story)</span>
+                    <span>{t.formatStoryTitle}</span>
                   </div>
                   <p className="text-[11px] text-white/60 mt-1">
-                    თანამედროვე მხატვრული მოთხრობა ბუნებრივი დიალოგებით.
+                    {t.formatStoryDesc}
                   </p>
                 </button>
               </div>
@@ -645,10 +651,10 @@ export default function LibraryPage() {
             {importMode !== 'original' && (
               <div className="space-y-2">
                 <label className="text-xs font-semibold uppercase tracking-wider text-white/60">
-                  2. აირჩიეთ ინგლისურის დონე (CEFR Level):
+                  {t.step2Cefr}
                 </label>
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-                  {CEFR_LEVELS.map(item => (
+                  {cefrLevels.map(item => (
                     <button
                       key={item.level}
                       type="button"
@@ -673,7 +679,7 @@ export default function LibraryPage() {
                       onChange={e => setIncludeOriginal(e.target.checked)}
                       className="rounded border-white/20"
                     />
-                    <span>მეორე თავად (Chapter 2) მოაყოლე ორიგინალი ტექსტიც შესადარებლად</span>
+                    <span>{t.includeOriginalCheckbox}</span>
                   </label>
                 )}
               </div>
@@ -693,7 +699,7 @@ export default function LibraryPage() {
                 disabled={importing}
                 className="px-4 py-2.5 text-sm rounded-xl border border-white/15 hover:bg-white/10 transition-colors cursor-pointer disabled:opacity-50"
               >
-                გაუქმება
+                {t.cancel}
               </button>
               <button
                 type="button"
@@ -704,19 +710,19 @@ export default function LibraryPage() {
                 {importing ? (
                   <>
                     <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                    <span>მზადდება Reader-ისთვის...</span>
+                    <span>{t.btnPreparing}</span>
                   </>
                 ) : (
                   <>
                     <span>🚀</span>
                     <span>
                       {importMode === 'original'
-                        ? 'ორიგინალის გახსნა Reader-ში'
+                        ? t.btnOpenOriginal
                         : importMode === 'podcast'
-                        ? `პოდკასტის (${cefrLevel}) გახსნა Reader-ში`
+                        ? t.btnOpenPodcast.replace('{level}', cefrLevel)
                         : importMode === 'story'
-                        ? `მოთხრობის (${cefrLevel}) გახსნა Reader-ში`
-                        : `მორგება (${cefrLevel}) & გახსნა Reader-ში`}
+                        ? t.btnOpenStory.replace('{level}', cefrLevel)
+                        : t.btnOpenAdapted.replace('{level}', cefrLevel)}
                     </span>
                   </>
                 )}

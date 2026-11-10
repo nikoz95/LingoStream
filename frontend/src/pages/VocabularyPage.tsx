@@ -1,6 +1,8 @@
 import { useEffect, useState, useCallback, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../lib/auth';
+import { useLanguage } from '../lib/i18n';
+import LanguageToggle from '../components/LanguageToggle';
 import {
   listVocabularyWords,
   deleteVocabularyWord,
@@ -16,6 +18,7 @@ type GameType = 'quiz' | 'flashcards';
 export default function VocabularyPage() {
   const navigate = useNavigate();
   const { logout } = useAuth();
+  const { t } = useLanguage();
   const [words, setWords] = useState<VocabularyWord[]>([]);
   const [books, setBooks] = useState<BookListItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -310,28 +313,29 @@ export default function VocabularyPage() {
             <button
               onClick={handleBack}
               className="p-2 rounded-xl hover:bg-white/10 transition-colors"
-              title="ბიბლიოთეკაში დაბრუნება"
+              title={t.back}
             >
               <svg className="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
               </svg>
             </button>
             <div>
-              <h1 className="text-xl font-bold text-white">ჩემი ლექსიკონი (Vocabulary)</h1>
+              <h1 className="text-xl font-bold text-white">{t.vocabTitle}</h1>
               <p className="text-xs text-white/50">
-                სულ: {totalWordsCount} სიტყვა • <span className="text-emerald-400">ნასწავლი: {masteredCount}</span> •{' '}
-                <span className="text-purple-300">სასწავლი: {learningCount}</span>
+                {t.vocabTotal}: {totalWordsCount} • <span className="text-emerald-400">{t.vocabMastered}: {masteredCount}</span> •{' '}
+                <span className="text-purple-300">{t.vocabLearning}: {learningCount}</span>
               </p>
             </div>
           </div>
 
           <div className="flex items-center gap-3">
+            <LanguageToggle />
             <button
               onClick={() => navigate('/writing')}
               className="px-4 py-2 text-sm rounded-xl border border-purple-400/30 bg-purple-500/10 hover:bg-purple-500/20 text-white font-medium transition-colors flex items-center gap-2 cursor-pointer"
             >
               <span>✍️</span>
-              <span>Writing</span>
+              <span>{t.navWriting}</span>
             </button>
             {learningCount > 0 && (
               <button
@@ -341,8 +345,8 @@ export default function VocabularyPage() {
                 <span>🎮</span>
                 <span>
                   {selectedBookFilter === 'all'
-                    ? `თამაში ყველა წიგნიდან (${learningCount})`
-                    : 'ამ წიგნის სიტყვებით თამაში'}
+                    ? `${t.vocabPlayAll} (${learningCount})`
+                    : t.vocabPlayBook}
                 </span>
               </button>
             )}
@@ -350,7 +354,7 @@ export default function VocabularyPage() {
               onClick={handleLogout}
               className="px-4 py-2 text-sm rounded-xl bg-white/10 hover:bg-white/20 text-white font-medium transition-colors"
             >
-              გასვლა
+              {t.navSignOut}
             </button>
           </div>
         </div>
@@ -380,8 +384,8 @@ export default function VocabularyPage() {
                 d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"
               />
             </svg>
-            <p className="text-lg text-white/50 mb-2">ლექსიკონი ჯერ ცარიელია</p>
-            <p className="text-sm text-white/30">წიგნის კითხვისას მონიშნეთ და შეინახეთ სიტყვები</p>
+            <p className="text-lg text-white/50 mb-2">{t.vocabEmpty}</p>
+            <p className="text-sm text-white/30">{t.vocabEmptyDesc}</p>
           </div>
         )}
 
@@ -397,13 +401,13 @@ export default function VocabularyPage() {
                     : 'bg-white/5 text-white/70 border-white/10 hover:bg-white/10'
                 }`}
               >
-                📚 ყველა წიგნი ({words.length})
+                📚 {t.vocabAllBooks} ({words.length})
               </button>
 
               {Array.from(groupedByBook.entries()).map(([bookKey, groupWords]) => {
                 const bookObj = typeof bookKey === 'number' ? bookMap.get(bookKey) : null;
                 const label =
-                  bookObj?.title || (bookKey === 'unassigned' ? 'Writing / სხვა სიტყვები' : `წიგნი #${bookKey}`);
+                  bookObj?.title || (bookKey === 'unassigned' ? 'Writing / General' : `#${bookKey}`);
                 const active = selectedBookFilter === bookKey;
                 const unmasteredInBook = groupWords.filter((w) => !w.is_mastered).length;
 
@@ -419,7 +423,7 @@ export default function VocabularyPage() {
                   >
                     <span className="truncate max-w-[180px]">📖 {label}</span>
                     <span className="px-1.5 py-0.5 rounded-md bg-black/30 text-[10px]">
-                      {groupWords.length} ({unmasteredInBook} სასწავლი)
+                      {groupWords.length} ({unmasteredInBook} {t.vocabLearning})
                     </span>
                   </button>
                 );
@@ -431,7 +435,7 @@ export default function VocabularyPage() {
               {visibleGroups.map(([bookKey, groupWords]) => {
                 const bookObj = typeof bookKey === 'number' ? bookMap.get(bookKey) : null;
                 const bookTitle =
-                  bookObj?.title || (bookKey === 'unassigned' ? 'Writing & ზოგადი ლექსიკონი' : `წიგნი #${bookKey}`);
+                  bookObj?.title || (bookKey === 'unassigned' ? 'Writing & General Vocabulary' : `#${bookKey}`);
                 const bookAuthor = bookObj?.author;
                 const masteredInGroup = groupWords.filter((w) => w.is_mastered).length;
                 const unmasteredInGroup = groupWords.length - masteredInGroup;
@@ -455,15 +459,15 @@ export default function VocabularyPage() {
                                 onClick={() => navigate(`/read/${bookKey}`)}
                                 className="text-xs text-purple-400 hover:text-purple-300 underline"
                               >
-                                წიგნზე გადასვლა →
+                                {t.vocabGoToBook}
                               </button>
                             )}
                           </div>
                           <p className="text-xs text-white/50">
                             {bookAuthor ? `${bookAuthor} • ` : ''}
-                            სულ {groupWords.length} სიტყვა •{' '}
-                            <span className="text-emerald-400">{masteredInGroup} ნასწავლი</span> •{' '}
-                            <span className="text-amber-300">{unmasteredInGroup} სასწავლი</span>
+                            {t.vocabTotal} {groupWords.length} •{' '}
+                            <span className="text-emerald-400">{masteredInGroup} {t.vocabMastered}</span> •{' '}
+                            <span className="text-amber-300">{unmasteredInGroup} {t.vocabLearning}</span>
                           </p>
                         </div>
                       </div>
@@ -474,7 +478,7 @@ export default function VocabularyPage() {
                           className="px-3.5 py-2 rounded-xl bg-purple-600/25 hover:bg-purple-600 border border-purple-500/40 text-xs font-semibold text-purple-200 hover:text-white transition-all flex items-center gap-1.5 cursor-pointer"
                         >
                           <span>🎯</span>
-                          <span>ამ წიგნის სიტყვების ვარჯიში ({unmasteredInGroup})</span>
+                          <span>{t.vocabPracticeWords} ({unmasteredInGroup})</span>
                         </button>
                       )}
                     </div>

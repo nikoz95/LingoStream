@@ -53,3 +53,8 @@ Use this file to jump directly to the files implementing a feature without searc
 - **Frontend API:** `frontend/src/lib/api.ts` (`listVocabularyWords`, `saveVocabularyWord`, `updateVocabularyWord`, `checkVocabularyWord`, `deleteVocabularyWord`)
 - **Backend Routes:** `backend/infrastructure/web/api/v1/routes/vocabulary_router.py`
 - **ORM Model:** `VocabularyWordORM` in `backend/infrastructure/database/postgres/models.py`
+
+## 6. UI Internationalization & Language Switcher
+- **Frontend i18n Context & Dictionary:** `frontend/src/lib/i18n.tsx` (`LanguageProvider`, `useLanguage`, type-safe translations dictionary)
+- **UI Language Switcher Component:** `frontend/src/components/LanguageToggle.tsx` (toggle between Georgian `ka` 🇬🇪 and English `en` 🇬🇧, persisted in `localStorage`)
+- **Covered Views:** Header navigation, Library & Discover Hub (`LibraryPage.tsx`), Vocabulary (`VocabularyPage.tsx`), Writing Studio (`WritingPage.tsx`).

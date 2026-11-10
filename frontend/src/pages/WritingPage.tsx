@@ -1,5 +1,7 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useLanguage } from '../lib/i18n';
+import LanguageToggle from '../components/LanguageToggle';
 import {
   evaluateWriting,
   sendWritingChat,
@@ -51,54 +53,66 @@ const SPARK_PROMPTS = [
   'What is the funniest misunderstanding you have ever experienced or witnessed?',
 ];
 
-const ROLEPLAY_SCENARIOS = [
+const getRoleplayScenarios = (lang: string) => [
   {
     id: 'free',
     icon: '💬',
-    title: 'თავისუფალი საუბარი (Free Talk)',
-    desc: 'მეგობრული საუბარი ნებისმიერ თემაზე — ფილმები, იდეები, ყოველდღიურობა',
+    title: lang === 'ka' ? 'თავისუფალი საუბარი (Free Talk)' : 'Free Talk & Casual Chat',
+    desc: lang === 'ka' ? 'მეგობრული საუბარი ნებისმიერ თემაზე — ფილმები, იდეები, ყოველდღიურობა' : 'Friendly conversation about everyday life, movies, and ideas',
     prompt: 'Casual, friendly conversation with a curious friend about daily life, hobbies, movies, or ideas.',
   },
   {
     id: 'detective',
     icon: '🕵️',
-    title: 'დეტექტიური გამოძიება (Mystery)',
-    desc: 'მუზეუმიდან ნახატი გაქრა — შენ ხარ დეტექტივი ან ეჭვმიტანილი',
+    title: lang === 'ka' ? 'დეტექტიური გამოძიება (Mystery)' : 'Detective Mystery',
+    desc: lang === 'ka' ? 'მუზეუმიდან ნახატი გაქრა — შენ ხარ დეტექტივი ან ეჭვმიტანილი' : 'A painting was stolen from the museum — you are the detective or suspect',
     prompt: 'A famous painting was stolen from the Grand Museum last night. Play a witty witness/suspect being questioned by the user, or challenge their alibi in a fun mystery roleplay.',
   },
   {
     id: 'debate',
     icon: '🎭',
-    title: 'დებატები (Debate Me)',
-    desc: 'AI იცავს საპირისპირო პოზიციას და შენ შენი არგუმენტებით ეკამათები',
+    title: lang === 'ka' ? 'დებატები (Debate Me)' : 'Debate Me',
+    desc: lang === 'ka' ? 'AI იცავს საპირისპირო პოზიციას და შენ შენი არგუმენტებით ეკამათები' : 'The AI defends the opposing view and you debate with arguments',
     prompt: 'Playful intellectual debate partner. Pick an interesting everyday controversy (e.g. remote work vs office, AI creativity, city vs nature) and challenge the user with sharp but friendly counterarguments.',
   },
   {
     id: 'travel',
     icon: '☕',
-    title: 'მოგზაურობა და სიტუაციები (Real Life)',
-    desc: 'უცხო ქალაქში სასტუმროს, კაფეს ან დაკარგული ბარგის მოგვარება',
+    title: lang === 'ka' ? 'მოგზაურობა და სიტუაციები (Real Life)' : 'Travel & Real Life Situations',
+    desc: lang === 'ka' ? 'უცხო ქალაქში სასტუმროს, კაფეს ან დაკარგული ბარგის მოგვარება' : 'Handle hotel check-ins, cafes, or lost luggage in a new city',
     prompt: 'Roleplay a lively real-world travel situation: the user just arrived in London, their hotel reservation got mixed up or they are ordering at a busy local spot. Be helpful, realistic, and conversational.',
   },
   {
     id: 'interview',
     icon: '🚀',
-    title: 'იდეის პრეზენტაცია / ინტერვიუ',
-    desc: 'წარადგინე შენი პროექტი ან გაიარე საინტერესო გასაუბრება',
+    title: lang === 'ka' ? 'იდეის პრეზენტაცია / ინტერვიუ' : 'Project Pitch / Interview',
+    desc: lang === 'ka' ? 'წარადგინე შენი პროექტი ან გაიარე საინტერესო გასაუბრება' : 'Pitch your project or complete an engaging interview',
     prompt: 'You are an enthusiastic podcast host or startup investor interviewing the user about their work, passions, or a cool project they are building.',
   },
 ];
 
-const QUICK_DEEP_DIVE_QUESTIONS = [
-  'გრამატიკული წესი დეტალურად ამიხსენი',
-  'ჩემი ვერსია რატომ არის შეცდომა და როდის იქნებოდა სწორი?',
-  'რა ნიუანსური სხვაობაა ჩემსა და შესწორებულ ვარიანტს შორის?',
-  'მომეცი კიდევ 3 ბუნებრივი სასაუბრო მაგალითი',
-];
+const getQuickQuestions = (lang: string) =>
+  lang === 'ka'
+    ? [
+        'გრამატიკული წესი დეტალურად ამიხსენი',
+        'ჩემი ვერსია რატომ არის შეცდომა და როდის იქნებოდა სწორი?',
+        'რა ნიუანსური სხვაობაა ჩემსა და შესწორებულ ვარიანტს შორის?',
+        'მომეცი კიდევ 3 ბუნებრივი სასაუბრო მაგალითი',
+      ]
+    : [
+        'Explain the grammar rule in detail',
+        'Why was my phrasing incorrect and when would it be used?',
+        'What is the nuance difference between my version and the correction?',
+        'Give me 3 more natural spoken examples',
+      ];
 
 export default function WritingPage() {
   const navigate = useNavigate();
+  const { t, lang } = useLanguage();
   const [mode, setMode] = useState<StudioMode>('free');
+
+  const roleplayScenarios = useMemo(() => getRoleplayScenarios(lang), [lang]);
+  const quickQuestions = useMemo(() => getQuickQuestions(lang), [lang]);
 
   // ── Free Writing State (with localStorage draft persistence) ──
   const [topic, setTopic] = useState(() => localStorage.getItem('ls_writing_draft_topic') || '');
@@ -155,14 +169,14 @@ export default function WritingPage() {
   }, []);
 
   const handleDeleteSubmission = useCallback(async (id: number) => {
-    if (!window.confirm('წავშალოთ ეს თემა ისტორიიდან?')) return;
+    if (!window.confirm(t.writingDeleteConfirm)) return;
     try {
       await deleteWritingSubmission(id);
       setSubmissions((prev) => prev.filter((s) => s.id !== id));
     } catch {
       // ignore
     }
-  }, []);
+  }, [t.writingDeleteConfirm]);
 
   const handleLoadSubmissionIntoStudio = useCallback((sub: WritingSubmissionItem) => {
     setTopic(sub.topic || '');
@@ -425,7 +439,7 @@ export default function WritingPage() {
   // ── Start or Reset Interactive Chat ──
   const startNewChat = useCallback(
     async (scenarioOverride?: string) => {
-      const scenarioObj = ROLEPLAY_SCENARIOS.find((s) => s.id === selectedScenarioId);
+      const scenarioObj = roleplayScenarios.find((s) => s.id === selectedScenarioId);
       const effectiveScenario =
         scenarioOverride ||
         (customScenario.trim() ? customScenario.trim() : scenarioObj?.prompt || 'Friendly conversation');
@@ -457,7 +471,7 @@ export default function WritingPage() {
         setChatLoading(false);
       }
     },
-    [selectedScenarioId, customScenario],
+    [roleplayScenarios, selectedScenarioId, customScenario],
   );
 
   // ── Send User Message in Chat ──
@@ -476,7 +490,7 @@ export default function WritingPage() {
     setChatTurns(nextTurns);
     setChatLoading(true);
 
-    const scenarioObj = ROLEPLAY_SCENARIOS.find((s) => s.id === selectedScenarioId);
+    const scenarioObj = roleplayScenarios.find((s) => s.id === selectedScenarioId);
     const effectiveScenario = customScenario.trim()
       ? customScenario.trim()
       : scenarioObj?.prompt || 'Friendly conversation';
@@ -571,13 +585,13 @@ export default function WritingPage() {
             onClick={() => setOpenDeepDiveIds((prev) => ({ ...prev, [threadId]: false }))}
             className="text-xs text-white/40 hover:text-white/80 cursor-pointer"
           >
-            დახურვა ✕
+            {t.close} ✕
           </button>
         </div>
 
         {/* Quick Question Chips */}
         <div className="flex flex-wrap gap-1.5">
-          {QUICK_DEEP_DIVE_QUESTIONS.map((q) => (
+          {quickQuestions.map((q) => (
             <button
               key={q}
               onClick={() =>
@@ -722,7 +736,7 @@ export default function WritingPage() {
           <button
             onClick={() => navigate('/library')}
             className="p-2 rounded-xl hover:bg-white/10 transition-colors cursor-pointer shrink-0"
-            title="ბიბლიოთეკაში დაბრუნება"
+            title={t.back}
           >
             <svg className="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
@@ -730,33 +744,34 @@ export default function WritingPage() {
           </button>
           <div className="min-w-0">
             <h1 className="text-sm sm:text-lg lg:text-xl font-bold bg-gradient-to-r from-purple-400 via-pink-400 to-indigo-400 bg-clip-text text-transparent truncate">
-              ✍️ Writing Studio
+              ✍️ {t.writingTitle}
             </h1>
             <p className="text-[11px] text-white/50 hidden md:block truncate">
-              თავისუფალი წერა, ცოცხალი დიალოგი, გრამატიკაში ჩაძიება და Vocabulary-ს შევსება
+              {t.writingSubtitle}
             </p>
           </div>
         </div>
 
         <div className="flex items-center gap-1.5 sm:gap-2.5 shrink-0">
+          <LanguageToggle />
           <button
             onClick={() => navigate('/library')}
             className="px-2.5 sm:px-3.5 py-1.5 sm:py-2 text-xs sm:text-sm rounded-xl border border-white/15 hover:bg-white/10 transition-all cursor-pointer"
           >
-            📚 <span className="hidden sm:inline">Library</span>
+            📚 <span className="hidden sm:inline">{t.navLibrary}</span>
           </button>
           <button
             onClick={() => navigate('/vocabulary')}
             className="px-2.5 sm:px-3.5 py-1.5 sm:py-2 text-xs sm:text-sm rounded-xl border border-purple-400/30 bg-purple-500/10 hover:bg-purple-500/20 transition-all cursor-pointer flex items-center gap-1"
           >
             <span>🗂️</span>
-            <span className="hidden xs:inline sm:inline">Vocab</span>
+            <span className="hidden xs:inline sm:inline">{t.navVocabulary}</span>
           </button>
           <button
             onClick={handleLogout}
             className="px-2.5 sm:px-3.5 py-1.5 sm:py-2 text-xs sm:text-sm rounded-xl border border-white/15 hover:bg-white/10 transition-colors cursor-pointer"
           >
-            <span className="hidden sm:inline">Sign Out</span>
+            <span className="hidden sm:inline">{t.navSignOut}</span>
             <span className="sm:hidden">🚪</span>
           </button>
         </div>
@@ -775,7 +790,7 @@ export default function WritingPage() {
               }`}
             >
               <span>📝</span>
-              <span className="truncate">Free Writing</span>
+              <span className="truncate">{t.writingTabFree}</span>
             </button>
             <button
               onClick={() => {
@@ -791,7 +806,7 @@ export default function WritingPage() {
               }`}
             >
               <span>💬</span>
-              <span className="truncate">Roleplay Chat</span>
+              <span className="truncate">{t.writingTabChat}</span>
             </button>
             <button
               onClick={() => {
@@ -805,13 +820,12 @@ export default function WritingPage() {
               }`}
             >
               <span>📜</span>
-              <span className="truncate">თემები & ანალიზი ({submissions.length})</span>
+              <span className="truncate">{t.writingTabHistory} ({submissions.length})</span>
             </button>
           </div>
 
           <div className="text-[11px] sm:text-xs text-white/50 bg-white/[0.03] border border-white/10 px-3 py-2 rounded-xl leading-relaxed">
-            💡 <span className="text-purple-300 font-medium">რჩევა:</span> თუ წერისას სიტყვა არ გახსენდება, პირდაპირ{' '}
-            <span className="text-emerald-300 font-medium">ქართულად ჩაწერე</span> — AI თარგმნის და აგიხსნის!
+            💡 {t.writingHint}
           </div>
         </div>
 
@@ -872,8 +886,8 @@ export default function WritingPage() {
                   }`}
                 >
                   {savedWordsMap[lookupResult.word.toLowerCase().trim()]
-                    ? '✓ შენახულია Vocabulary-ში'
-                    : '+ Save to Vocabulary'}
+                    ? t.writingSavedToVocab
+                    : t.writingSaveToVocab}
                 </button>
               </div>
             )}
@@ -888,13 +902,13 @@ export default function WritingPage() {
             {/* Left Column: Editor */}
             <div className="lg:col-span-5 space-y-4 rounded-2xl bg-white/[0.03] border border-white/10 p-5">
               <div className="flex items-center justify-between gap-2">
-                <h2 className="text-base font-semibold text-white">📝 შენი ტექსტი</h2>
+                <h2 className="text-base font-semibold text-white">📝 {t.writingYourText}</h2>
                 <button
                   onClick={handleSparkPrompt}
                   className="text-xs px-3 py-1.5 rounded-xl bg-purple-500/15 hover:bg-purple-500/25 border border-purple-400/30 text-purple-200 transition-colors cursor-pointer flex items-center gap-1.5"
                 >
                   <span>🎲</span>
-                  <span>შემომთავაზე თემა</span>
+                  <span>{t.writingRandomPrompt}</span>
                 </button>
               </div>
 
@@ -904,7 +918,7 @@ export default function WritingPage() {
                   type="text"
                   value={topic}
                   onChange={(e) => setTopic(e.target.value)}
-                  placeholder="თემა ან სიტუაცია (სურვილისამებრ)..."
+                  placeholder={t.writingTopicPlaceholder}
                   className="w-full bg-black/30 border border-white/10 rounded-xl px-3.5 py-2.5 text-base sm:text-xs text-white placeholder-white/35 focus:outline-none focus:border-purple-400"
                 />
               </div>
@@ -915,7 +929,7 @@ export default function WritingPage() {
                   value={text}
                   onChange={(e) => setText(e.target.value)}
                   rows={8}
-                  placeholder={`დაწერე ნებისმიერ თემაზე ინგლისურად...\n\nთუ რაიმე სიტყვა ან ფრაზა არ გახსენდება, პირდაპირ ქართულად ჩაწერე:\nმაგ: "Yesterday I wanted to call him, მაგრამ გადავიფიქრე because it was too late."`}
+                  placeholder={t.writingPlaceholder}
                   className="w-full bg-black/40 border border-white/15 rounded-2xl p-3.5 sm:p-4 text-base sm:text-sm text-white placeholder-white/30 leading-relaxed focus:outline-none focus:border-purple-400 resize-y"
                 />
               </div>
@@ -932,7 +946,7 @@ export default function WritingPage() {
                   }`}
                 >
                   <span>🎤</span>
-                  <span>{isListening ? 'მიმდინარეობს ჩაწერა... (გაჩერება)' : 'ხმით კარნახი (Speak)'}</span>
+                  <span>{isListening ? t.writingVoiceListening : t.writingVoiceTyping}</span>
                 </button>
 
                 <button
@@ -941,7 +955,7 @@ export default function WritingPage() {
                   className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 disabled:opacity-40 text-sm font-semibold text-white shadow-lg shadow-purple-600/30 transition-all cursor-pointer flex items-center justify-center gap-2"
                 >
                   <span>✨</span>
-                  <span>{evaluating ? 'AI ამოწმებს...' : 'შემოწმება და გარჩევა'}</span>
+                  <span>{evaluating ? t.writingChecking : t.writingCheckBtn}</span>
                 </button>
               </div>
 
@@ -956,7 +970,7 @@ export default function WritingPage() {
             <div className="lg:col-span-7 space-y-5">
               {evaluating && (
                 <div className="rounded-2xl bg-white/[0.03] border border-white/10 p-12 flex items-center justify-center">
-                  <LoadingSpinner message="AI აანალიზებს შენს ტექსტს, ასწორებს გრამატიკას და ამზადებს სასაუბრო ვერსიებს..." />
+                  <LoadingSpinner message={t.writingChecking} />
                 </div>
               )}
 
@@ -964,11 +978,12 @@ export default function WritingPage() {
                 <div className="rounded-2xl bg-white/[0.03] border border-white/10 p-10 text-center space-y-3">
                   <div className="text-4xl">✨</div>
                   <h3 className="text-base font-semibold text-white/80">
-                    დაწერე ან ილაპარაკე თავისუფლად
+                    {lang === 'ka' ? 'დაწერე ან ილაპარაკე თავისუფლად' : 'Write or speak freely'}
                   </h3>
                   <p className="text-xs text-white/45 max-w-md mx-auto leading-relaxed">
-                    AI შეგიმოწმებს გრამატიკას, გაჩვენებს როგორ იტყოდა ამავე აზრს მშობლიური ენის მატარებელი საუბრისას,
-                    და ნებისმიერ წესზე შეგეძლება იქვე დააჭირო <span className="text-indigo-300">„🔍 რატომ? / ჩაეძიე“</span>.
+                    {lang === 'ka'
+                      ? 'AI შეგიმოწმებს გრამატიკას, გაჩვენებს როგორ იტყოდა ამავე აზრს მშობლიური ენის მატარებელი საუბრისას, და ნებისმიერ წესზე შეგეძლება იქვე დააჭირო „🔍 რატომ? / ჩაეძიე“.'
+                      : 'AI will check your grammar, suggest how a native speaker would naturally phrase it, and allow you to deep-dive into any grammar rule.'}
                   </p>
                 </div>
               )}
@@ -979,10 +994,10 @@ export default function WritingPage() {
                   <div className="rounded-2xl bg-gradient-to-r from-purple-900/30 to-indigo-900/30 border border-purple-500/30 p-5 space-y-2">
                     <div className="flex items-center justify-between">
                       <span className="text-xs font-semibold uppercase tracking-wider text-purple-300">
-                        🎓 AI შეფასება
+                        {lang === 'ka' ? '🎓 AI შეფასება' : '🎓 AI Evaluation'}
                       </span>
                       <span className="px-3 py-1 rounded-full bg-purple-500/25 border border-purple-400/40 text-xs font-bold text-purple-200">
-                        დონე: {evalResult.cefr_level}
+                        {lang === 'ka' ? 'დონე' : 'Level'}: {evalResult.cefr_level}
                       </span>
                     </div>
                     <p className="text-sm text-white/90 leading-relaxed">{evalResult.overall_feedback}</p>
@@ -1000,7 +1015,7 @@ export default function WritingPage() {
                               : 'bg-white/5 text-white/60 hover:text-white'
                           }`}
                         >
-                          🗣️ Natural Spoken (სასაუბრო)
+                          {t.writingRewriteSpoken}
                         </button>
                         <button
                           onClick={() => setActiveRewriteTab('corrected')}
@@ -1010,7 +1025,7 @@ export default function WritingPage() {
                               : 'bg-white/5 text-white/60 hover:text-white'
                           }`}
                         >
-                          ✅ Grammar Corrected (გასწორებული)
+                          {t.writingRewriteCorrected}
                         </button>
                         <button
                           onClick={() => setActiveRewriteTab('elevated')}
@@ -1020,7 +1035,7 @@ export default function WritingPage() {
                               : 'bg-white/5 text-white/60 hover:text-white'
                           }`}
                         >
-                          ✨ Elevated (დახვეწილი)
+                          {t.writingRewriteElevated}
                         </button>
                       </div>
 
@@ -1037,7 +1052,7 @@ export default function WritingPage() {
                         className="px-3 py-1.5 rounded-xl bg-white/10 hover:bg-white/20 text-xs text-white flex items-center gap-1.5 cursor-pointer"
                       >
                         <span>🔊</span>
-                        <span>მოსმენა</span>
+                        <span>{lang === 'ka' ? 'მოსმენა' : 'Listen'}</span>
                       </button>
                     </div>
 
@@ -1051,7 +1066,9 @@ export default function WritingPage() {
                       )}
                     </div>
                     <p className="text-[11px] text-white/40">
-                      💡 დააჭირე ტექსტში ნებისმიერ სიტყვას სათარგმნად და Vocabulary-ში შესანახად.
+                      {lang === 'ka'
+                        ? '💡 დააჭირე ტექსტში ნებისმიერ სიტყვას სათარგმნად და Vocabulary-ში შესანახად.'
+                        : '💡 Click any word in the text to translate and save to Vocabulary.'}
                     </p>
                   </div>
 
@@ -1060,7 +1077,7 @@ export default function WritingPage() {
                     <div className="rounded-2xl bg-white/[0.03] border border-white/10 p-5 space-y-4">
                       <h3 className="text-sm font-semibold text-white flex items-center gap-2">
                         <span>🛠️</span>
-                        <span>შესწორებები და დეტალური ჩაძიება ({evalResult.corrections.length})</span>
+                        <span>{t.writingCorrectionsTitle} ({evalResult.corrections.length})</span>
                       </h3>
 
                       <div className="space-y-3">
@@ -1083,7 +1100,7 @@ export default function WritingPage() {
                                   <button
                                     onClick={() => speakText(item.corrected)}
                                     className="text-xs text-white/50 hover:text-white px-1.5 py-0.5 rounded bg-white/5 cursor-pointer"
-                                    title="მოსმენა"
+                                    title={lang === 'ka' ? 'მოსმენა' : 'Listen'}
                                   >
                                     🔊
                                   </button>
@@ -1101,8 +1118,7 @@ export default function WritingPage() {
                                     }
                                     className="px-3 py-1 rounded-lg bg-indigo-500/20 hover:bg-indigo-500/30 border border-indigo-400/40 text-xs font-semibold text-indigo-200 transition-colors cursor-pointer flex items-center gap-1"
                                   >
-                                    <span>🔍</span>
-                                    <span>რატომ? / ჩაეძიე</span>
+                                    <span>{t.writingDeepDiveBtn}</span>
                                   </button>
                                 </div>
                               </div>
@@ -1130,7 +1146,11 @@ export default function WritingPage() {
                   <div className="rounded-2xl bg-indigo-950/30 border border-indigo-500/25 p-5 space-y-3">
                     <h3 className="text-sm font-semibold text-indigo-200 flex items-center gap-2">
                       <span>🎓</span>
-                      <span>გაქვს კითხვა ნებისმიერ წინადადებაზე ან გრამატიკულ ფორმაზე?</span>
+                      <span>
+                        {lang === 'ka'
+                          ? 'გაქვს კითხვა ნებისმიერ წინადადებაზე ან გრამატიკულ ფორმაზე?'
+                          : 'Have a question about any sentence or grammar form?'}
+                      </span>
                     </h3>
                     <div className="flex flex-wrap gap-2">
                       <input
@@ -1149,7 +1169,7 @@ export default function WritingPage() {
                             setCustomExplainPhrase('');
                           }
                         }}
-                        placeholder="დასვი ნებისმიერი კითხვა (მაგ: რატომ გამოიყენე 'would have' მეორე წინადადებაში?)..."
+                        placeholder={t.writingDeepDivePlaceholder}
                         className="flex-1 bg-black/40 border border-white/15 rounded-xl px-3.5 py-2 text-xs text-white placeholder-white/40 focus:outline-none focus:border-indigo-400"
                       />
                       <button
@@ -1166,7 +1186,7 @@ export default function WritingPage() {
                         }}
                         className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-xs font-semibold text-white cursor-pointer"
                       >
-                        🔍 ამიხსენი
+                        🔍 {t.writingDeepDiveAsk}
                       </button>
                     </div>
                     {renderDeepDiveThread(
@@ -1181,7 +1201,7 @@ export default function WritingPage() {
                   {evalResult.speaking_connectors && evalResult.speaking_connectors.length > 0 && (
                     <div className="rounded-2xl bg-white/[0.03] border border-white/10 p-5 space-y-3">
                       <h3 className="text-sm font-semibold text-white">
-                        🔗 სასაუბრო ხიდები (Speaking Connectors)
+                        🔗 {t.writingConnectorsTitle}
                       </h3>
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                         {evalResult.speaking_connectors.map((sc, idx) => {
@@ -1224,7 +1244,7 @@ export default function WritingPage() {
                                     : 'bg-purple-500/15 hover:bg-purple-500/25 border-purple-400/30 text-purple-200'
                                 }`}
                               >
-                                {isSaved ? '✓ შენახულია' : '+ Vocabulary'}
+                                {isSaved ? (lang === 'ka' ? '✓ შენახულია' : '✓ Saved') : '+ Vocabulary'}
                               </button>
                             </div>
                           );
@@ -1237,7 +1257,7 @@ export default function WritingPage() {
                   {evalResult.suggested_words && evalResult.suggested_words.length > 0 && (
                     <div className="rounded-2xl bg-white/[0.03] border border-white/10 p-5 space-y-3">
                       <h3 className="text-sm font-semibold text-white">
-                        🗂️ რეკომენდებული სიტყვები და ფრაზები Vocabulary-სთვის
+                        🗂️ {t.writingVocabularyTitle}
                       </h3>
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                         {evalResult.suggested_words.map((sw, idx) => {
@@ -1281,7 +1301,7 @@ export default function WritingPage() {
                                     : 'bg-purple-600/30 hover:bg-purple-600/50 border-purple-400/40 text-white'
                                 }`}
                               >
-                                {isSaved ? '✓ შენახულია Vocabulary-ში' : '+ Save to Vocabulary'}
+                                {isSaved ? t.writingSavedToVocab : t.writingSaveToVocab}
                               </button>
                             </div>
                           );
@@ -1306,21 +1326,23 @@ export default function WritingPage() {
                 <h2 className="text-sm sm:text-base font-semibold text-white flex items-center gap-2">
                   <span>🎭</span>
                   <span>
-                    {ROLEPLAY_SCENARIOS.find((s) => s.id === selectedScenarioId)?.title ||
-                      'აირჩიე სცენარი'}
+                    {roleplayScenarios.find((s) => s.id === selectedScenarioId)?.title ||
+                      t.writingChatScenarioSelect}
                   </span>
                 </h2>
                 <button
                   onClick={() => setShowMobileScenarios((prev) => !prev)}
                   className="lg:hidden px-3 py-1.5 rounded-xl bg-white/10 text-xs font-semibold text-purple-200 cursor-pointer"
                 >
-                  {showMobileScenarios ? 'ჩაკეცვა ▲' : 'შეცვლა ▼'}
+                  {showMobileScenarios
+                    ? (lang === 'ka' ? 'ჩაკეცვა ▲' : 'Collapse ▲')
+                    : (lang === 'ka' ? 'შეცვლა ▼' : 'Change ▼')}
                 </button>
               </div>
 
               <div className={`${showMobileScenarios ? 'block' : 'hidden'} lg:block space-y-3`}>
                 <div className="space-y-2">
-                  {ROLEPLAY_SCENARIOS.map((sc) => {
+                  {roleplayScenarios.map((sc) => {
                     const active = selectedScenarioId === sc.id && !customScenario.trim();
                     return (
                       <button
@@ -1350,13 +1372,13 @@ export default function WritingPage() {
                 {/* Custom Scenario */}
                 <div className="pt-2 border-t border-white/10 space-y-2">
                   <label className="text-xs font-semibold text-white/70 block">
-                    ✨ ან შექმენი შენი სცენარი:
+                    {t.writingChatScenarioCustom}
                   </label>
                   <input
                     type="text"
                     value={customScenario}
                     onChange={(e) => setCustomScenario(e.target.value)}
-                    placeholder="მაგ: განვიხილოთ კოსმოსში მოგზაურობა..."
+                    placeholder={t.writingChatCustomPlaceholder}
                     className="w-full bg-black/40 border border-white/15 rounded-xl px-3 py-2 text-base sm:text-xs text-white placeholder-white/35 focus:outline-none focus:border-purple-400"
                   />
                   <button
@@ -1367,7 +1389,7 @@ export default function WritingPage() {
                     disabled={chatLoading}
                     className="w-full py-2 rounded-xl bg-white/10 hover:bg-white/15 text-xs font-semibold text-white transition-colors cursor-pointer"
                   >
-                    🔄 ახალი დიალოგის დაწყება
+                    {lang === 'ka' ? '🔄 ახალი დიალოგის დაწყება' : '🔄 Start New Chat'}
                   </button>
                 </div>
               </div>
@@ -1393,13 +1415,13 @@ export default function WritingPage() {
                       >
                         <div className="flex items-center justify-between gap-3">
                           <span className="text-[11px] font-semibold uppercase tracking-wider opacity-50">
-                            {turn.role === 'user' ? 'შენ' : '🤖 AI Partner'}
+                            {turn.role === 'user' ? t.writingChatYou : t.writingChatAi}
                           </span>
                           <div className="flex items-center gap-1.5">
                             <button
                               onClick={() => speakText(turn.content)}
                               className="text-xs px-2 py-0.5 rounded bg-white/10 hover:bg-white/20 cursor-pointer"
-                              title="მოსმენა"
+                              title={lang === 'ka' ? 'მოსმენა' : 'Listen'}
                             >
                               🔊
                             </button>
@@ -1416,7 +1438,9 @@ export default function WritingPage() {
                                 }
                                 className="text-[11px] px-2 py-0.5 rounded bg-white/10 hover:bg-white/20 text-purple-200 cursor-pointer"
                               >
-                                {turn.showTranslation ? 'თარგმნის დამალვა' : 'GEO თარგმანი'}
+                                {turn.showTranslation
+                                  ? (lang === 'ka' ? 'თარგმნის დამალვა' : 'Hide translation')
+                                  : (lang === 'ka' ? 'GEO თარგმანი' : 'Show translation')}
                               </button>
                             )}
                           </div>
@@ -1440,8 +1464,10 @@ export default function WritingPage() {
                         <div className="flex flex-wrap items-center justify-between gap-2">
                           <span className="font-semibold text-indigo-300">
                             {turn.feedback.is_perfect
-                              ? '✅ იდეალური და ბუნებრივი წინადადებაა!'
-                              : '💡 AI Coach-ის რჩევა:'}
+                              ? (lang === 'ka'
+                                  ? '✅ იდეალური და ბუნებრივი წინადადებაა!'
+                                  : '✅ Perfect and natural sentence!')
+                              : (lang === 'ka' ? '💡 AI Coach-ის რჩევა:' : '💡 AI Coach Advice:')}
                           </span>
                           <button
                             onClick={() =>
@@ -1454,21 +1480,21 @@ export default function WritingPage() {
                             }
                             className="px-2.5 py-1 rounded-lg bg-indigo-500/20 hover:bg-indigo-500/30 border border-indigo-400/40 text-indigo-200 font-semibold cursor-pointer"
                           >
-                            🔍 რატომ? / ჩაეძიე
+                            <span>{t.writingDeepDiveBtn}</span>
                           </button>
                         </div>
 
                         {!turn.feedback.is_perfect && turn.feedback.corrected && (
                           <div className="space-y-1">
                             <div>
-                              <span className="text-white/50">გასწორებული: </span>
+                              <span className="text-white/50">{lang === 'ka' ? 'გასწორებული: ' : 'Corrected: '}</span>
                               <span className="text-emerald-300 font-medium">
                                 {renderInteractiveText(turn.feedback.corrected)}
                               </span>
                             </div>
                             {turn.feedback.natural_alternative && (
                               <div>
-                                <span className="text-white/50">🗣️ საუბრისას იტყოდნენ: </span>
+                                <span className="text-white/50">🗣️ {t.writingChatInSpeech} </span>
                                 <span className="text-purple-200 font-medium">
                                   {renderInteractiveText(turn.feedback.natural_alternative)}
                                 </span>
@@ -1528,7 +1554,7 @@ export default function WritingPage() {
 
                 {chatLoading && (
                   <div className="py-4">
-                    <LoadingSpinner message="AI პასუხობს და ამოწმებს შენს მესიჯს..." />
+                    <LoadingSpinner message={t.writingChatThinking} />
                   </div>
                 )}
 
@@ -1547,7 +1573,7 @@ export default function WritingPage() {
                       ? 'bg-red-500/20 border-red-400 text-red-300 animate-pulse'
                       : 'bg-white/5 hover:bg-white/10 border-white/15 text-white/80'
                   }`}
-                  title="ხმით პასუხი (Speak)"
+                  title={t.writingVoiceTyping}
                 >
                   🎤
                 </button>
@@ -1560,7 +1586,7 @@ export default function WritingPage() {
                       handleSendChatMessage();
                     }
                   }}
-                  placeholder="მიწერე პასუხი ინგლისურად (ან ჩაურთე ქართული სიტყვა, თუ გაიჭედე)..."
+                  placeholder={t.writingChatInputPlaceholder}
                   className="flex-1 min-w-0 bg-black/40 border border-white/15 rounded-xl px-3.5 sm:px-4 py-3 text-base sm:text-sm text-white placeholder-white/35 focus:outline-none focus:border-purple-400"
                 />
                 <button
@@ -1568,7 +1594,7 @@ export default function WritingPage() {
                   disabled={chatLoading || !chatInput.trim()}
                   className="px-4 sm:px-5 py-3 rounded-xl bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 disabled:opacity-40 text-xs sm:text-sm font-semibold text-white cursor-pointer shrink-0"
                 >
-                  გაგზავნა
+                  {t.writingChatSend}
                 </button>
               </div>
             </div>
@@ -1586,10 +1612,10 @@ export default function WritingPage() {
                 <div className="space-y-1">
                   <h2 className="text-base sm:text-lg font-bold text-white flex items-center gap-2">
                     <span>📊</span>
-                    <span>საერთო პრობლემების ანალიზი & პრაქტიკული ფიქსი</span>
+                    <span>{t.writingDiagnosticTitle}</span>
                   </h2>
                   <p className="text-xs text-white/60 leading-relaxed">
-                    AI გადახედავს შენს ყველა შენახულ თემას, იპოვის განმეორებად შეცდომებს, აგიხსნის „ოქროს წესს“ და მოგცემს წერტილოვან სავარჯიშოებს.
+                    {t.writingDiagnosticDesc}
                   </p>
                 </div>
 
@@ -1601,15 +1627,15 @@ export default function WritingPage() {
                   <span>🧠</span>
                   <span>
                     {analyzingPatterns
-                      ? 'AI აანალიზებს თემებს...'
-                      : 'გააანალიზე ჩემი სუსტი წერტილები'}
+                      ? t.writingAnalyzing
+                      : t.writingAnalyzeBtn}
                   </span>
                 </button>
               </div>
 
               {analyzingPatterns && (
                 <div className="py-6">
-                  <LoadingSpinner message="AI სწავლობს შენს თემებს, აჯგუფებს შეცდომებს და ამზადებს პერსონალურ სავარჯიშოებს..." />
+                  <LoadingSpinner message={t.writingAnalyzing} />
                 </div>
               )}
 
@@ -1627,7 +1653,7 @@ export default function WritingPage() {
                     </p>
                     {patternAnalysis.level_trend && (
                       <span className="px-3 py-1 rounded-full bg-emerald-500/20 border border-emerald-400/40 text-xs font-bold text-emerald-300 shrink-0">
-                        📈 ტრენდი: {patternAnalysis.level_trend}
+                        📈 {t.writingTrend}: {patternAnalysis.level_trend}
                       </span>
                     )}
                   </div>
@@ -1656,7 +1682,7 @@ export default function WritingPage() {
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                           <div className="rounded-xl bg-white/[0.03] border border-white/10 p-3.5 space-y-1">
                             <span className="text-[11px] font-semibold uppercase tracking-wider text-red-300">
-                              ❓ რატომ მოგდის ეს შეცდომა:
+                              {t.writingWhyMistake}
                             </span>
                             <p className="text-xs text-white/80 leading-relaxed">
                               {wsItem.why_it_happens}
@@ -1665,7 +1691,7 @@ export default function WritingPage() {
 
                           <div className="rounded-xl bg-emerald-950/30 border border-emerald-500/30 p-3.5 space-y-1">
                             <span className="text-[11px] font-semibold uppercase tracking-wider text-emerald-300">
-                              💡 ოქროს წესი / სოლუშენი:
+                              {t.writingGoldenRule}
                             </span>
                             <p className="text-xs text-emerald-100 font-medium leading-relaxed">
                               {wsItem.golden_rule}
@@ -1677,7 +1703,7 @@ export default function WritingPage() {
                         {wsItem.user_examples && wsItem.user_examples.length > 0 && (
                           <div className="space-y-1.5">
                             <span className="text-xs font-semibold text-white/60">
-                              📌 მაგალითები შენი თემებიდან:
+                              {t.writingExamplesFromEssays}
                             </span>
                             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                               {wsItem.user_examples.map((ex, eIdx) => (
@@ -1699,7 +1725,7 @@ export default function WritingPage() {
                         {wsItem.drills && wsItem.drills.length > 0 && (
                           <div className="pt-2 border-t border-white/10 space-y-3">
                             <span className="text-xs font-semibold text-indigo-300 block">
-                              🏋️ პრაქტიკული ფიქსი (გადათარგმნე / გაასწორე წესის მიხედვით):
+                              {t.writingTargetedDrill}
                             </span>
                             {wsItem.drills.map((drill, dIdx) => {
                               const drillKey = `drill-${wIdx}-${dIdx}`;
@@ -1716,7 +1742,7 @@ export default function WritingPage() {
                                   </div>
                                   {drill.hint && (
                                     <div className="text-[11px] text-indigo-300/80">
-                                      მინიშნება: {drill.hint}
+                                      {t.writingDrillHint} {drill.hint}
                                     </div>
                                   )}
 
@@ -1730,7 +1756,7 @@ export default function WritingPage() {
                                           [drillKey]: e.target.value,
                                         }))
                                       }
-                                      placeholder="ჩაწერე შენი ვერსია ინგლისურად..."
+                                      placeholder={t.writingDrillPlaceholder}
                                       className="flex-1 bg-black/40 border border-white/15 rounded-xl px-3.5 py-2 text-base sm:text-xs text-white placeholder-white/35 focus:outline-none focus:border-indigo-400"
                                     />
                                     <div className="flex items-center gap-2">
@@ -1743,7 +1769,7 @@ export default function WritingPage() {
                                         }
                                         className="px-3.5 py-2 rounded-xl bg-emerald-600/30 hover:bg-emerald-600/50 border border-emerald-400/40 text-xs font-semibold text-emerald-200 cursor-pointer"
                                       >
-                                        {isRevealed ? 'დამალვა' : '✓ პასუხის ნახვა'}
+                                        {isRevealed ? t.writingHideAnswer : t.writingShowAnswer}
                                       </button>
                                       {userAttempt.trim() && (
                                         <button
@@ -1753,12 +1779,12 @@ export default function WritingPage() {
                                               userAttempt,
                                               drill.correct_answer,
                                               drill.prompt_ka,
-                                              `დავალება იყო: "${drill.prompt_ka}". მე დავწერე: "${userAttempt}". სწორი პასუხია: "${drill.correct_answer}". შემიფასე ჩემი ვერსია — სწორია თუ არა და რატომ?`,
+                                              `Assignment: "${drill.prompt_ka}". I wrote: "${userAttempt}". Correct answer: "${drill.correct_answer}". Evaluate my attempt.`,
                                             )
                                           }
                                           className="px-3 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-xs font-semibold text-white cursor-pointer"
                                         >
-                                          🔍 AI შემოწმება
+                                          {t.writingAiVerify}
                                         </button>
                                       )}
                                     </div>
@@ -1767,7 +1793,7 @@ export default function WritingPage() {
                                   {isRevealed && (
                                     <div className="rounded-lg bg-black/40 border border-emerald-500/30 p-3 text-xs space-y-1">
                                       <div className="text-emerald-300 font-semibold flex items-center justify-between">
-                                        <span>✅ სწორი პასუხი: {renderInteractiveText(drill.correct_answer)}</span>
+                                        <span>{t.writingCorrectAnswer} {renderInteractiveText(drill.correct_answer)}</span>
                                         <button
                                           onClick={() => speakText(drill.correct_answer)}
                                           className="px-1.5 py-0.5 rounded bg-white/10 text-white cursor-pointer"
@@ -1803,20 +1829,20 @@ export default function WritingPage() {
             <div className="space-y-4">
               <h2 className="text-base sm:text-lg font-bold text-white flex items-center gap-2">
                 <span>📜</span>
-                <span>შენახული თემები ({submissions.length})</span>
+                <span>{t.writingHistoryTitle} ({submissions.length})</span>
               </h2>
 
               {loadingSubmissions && (
                 <div className="py-10 flex justify-center">
-                  <LoadingSpinner message="თემები იტვირთება..." />
+                  <LoadingSpinner message={t.loading} />
                 </div>
               )}
 
               {!loadingSubmissions && submissions.length === 0 && (
                 <div className="rounded-2xl bg-white/[0.03] border border-white/10 p-10 text-center space-y-2">
-                  <p className="text-sm text-white/60">ჯერ შენახული თემები არ გაქვს.</p>
+                  <p className="text-sm text-white/60">{t.writingNoSavedTopics}</p>
                   <p className="text-xs text-white/40">
-                    როდესაც Free Writing-ში ტექსტს შეამოწმებ, ის ავტომატურად შეინახება აქ.
+                    {t.writingNoSavedTopicsDesc}
                   </p>
                 </div>
               )}
@@ -1834,7 +1860,7 @@ export default function WritingPage() {
                         </span>
                         <span className="text-[11px] text-white/40">
                           {sub.created_at
-                            ? new Date(sub.created_at).toLocaleDateString('ka-GE', {
+                            ? new Date(sub.created_at).toLocaleDateString(lang === 'ka' ? 'ka-GE' : 'en-US', {
                                 month: 'short',
                                 day: 'numeric',
                                 hour: '2-digit',
@@ -1863,19 +1889,19 @@ export default function WritingPage() {
 
                     <div className="flex items-center justify-between gap-2 pt-2 border-t border-white/10">
                       <span className="text-[11px] text-white/40">
-                        🛠️ {sub.corrections.length} შესწორება
+                        🛠️ {sub.corrections.length} {t.writingCorrectionsCount}
                       </span>
                       <div className="flex items-center gap-2">
                         <button
                           onClick={() => handleLoadSubmissionIntoStudio(sub)}
                           className="px-3.5 py-1.5 rounded-xl bg-purple-600/30 hover:bg-purple-600/50 border border-purple-400/40 text-xs font-semibold text-white cursor-pointer"
                         >
-                          📖 სრულად გახსნა
+                          {t.writingOpenEssay}
                         </button>
                         <button
                           onClick={() => handleDeleteSubmission(sub.id)}
                           className="p-1.5 rounded-xl hover:bg-red-500/20 text-red-400 text-xs cursor-pointer"
-                          title="წაშლა"
+                          title={t.delete}
                         >
                           🗑️
                         </button>
