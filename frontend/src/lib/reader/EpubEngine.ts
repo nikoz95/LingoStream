@@ -12,7 +12,7 @@ import { extractPickFromNode, pickTextFromPoint, type TextPick } from '../textPi
 import 'foliate-js/view.js';
 
 export type EpubLayoutMode = 'paginated-single' | 'paginated-spread' | 'scrolled';
-export type EpubTheme = 'night' | 'sepia' | 'light';
+export type EpubTheme = 'night' | 'sepia' | 'light' | 'emerald' | 'midnight';
 export type EpubFontFamily = 'literata' | 'sans' | 'georgia' | 'mono';
 
 export interface EpubStyleOptions {
@@ -53,6 +53,20 @@ const THEME_PALETTES: Record<EpubTheme, { bg: string; fg: string; heading: strin
     heading: '#111827',
     selection: 'rgba(168, 85, 247, 0.28)',
     link: '#7E22CE',
+  },
+  emerald: {
+    bg: '#052219',
+    fg: '#E0ECE7',
+    heading: '#F0FDF4',
+    selection: 'rgba(16, 185, 129, 0.38)',
+    link: '#34D399',
+  },
+  midnight: {
+    bg: '#0B132B',
+    fg: '#E0E6ED',
+    heading: '#FFFFFF',
+    selection: 'rgba(59, 130, 246, 0.38)',
+    link: '#60A5FA',
   },
 };
 

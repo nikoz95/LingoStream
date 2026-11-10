@@ -2,7 +2,8 @@
 import json
 import logging
 
-from fastapi import APIRouter, Depends, HTTPException
+from typing import Optional
+from fastapi import APIRouter, Depends, Header, HTTPException
 from sqlalchemy import desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -71,15 +72,23 @@ async def evaluate_user_writing(
     body: EvaluateWritingRequest,
     auth: AuthenticatedUser = Depends(authenticate_request),
     db: AsyncSession = Depends(get_session),
+    x_custom_provider: Optional[str] = Header(None),
+    x_custom_model: Optional[str] = Header(None),
+    x_custom_api_key: Optional[str] = Header(None),
+    x_custom_base_url: Optional[str] = Header(None),
 ):
     """Analyze free writing (including mixed Georgian/English), save it to DB, and return structured feedback."""
+    effective_provider = body.provider or x_custom_provider
     try:
         result = await ws.evaluate_writing(
             text=body.text,
             topic=body.topic or "",
             target_language=body.target_language,
             native_language=body.native_language,
-            provider=body.provider,
+            provider=effective_provider,
+            api_key_override=x_custom_api_key,
+            model_override=x_custom_model,
+            base_url_override=x_custom_base_url,
         )
 
         submission = WritingSubmission(
@@ -203,8 +212,13 @@ async def analyze_user_writing_patterns(
 async def writing_chat_turn(
     body: WritingChatRequest,
     auth: AuthenticatedUser = Depends(authenticate_request),
+    x_custom_provider: Optional[str] = Header(None),
+    x_custom_model: Optional[str] = Header(None),
+    x_custom_api_key: Optional[str] = Header(None),
+    x_custom_base_url: Optional[str] = Header(None),
 ):
     """Process a turn in an interactive conversation/roleplay and return reply + feedback."""
+    effective_provider = body.provider or x_custom_provider
     try:
         history = [{"role": m.role, "content": m.content} for m in body.messages]
         result = await ws.chat_turn(
@@ -212,7 +226,10 @@ async def writing_chat_turn(
             scenario=body.scenario,
             target_language=body.target_language,
             native_language=body.native_language,
-            provider=body.provider,
+            provider=effective_provider,
+            api_key_override=x_custom_api_key,
+            model_override=x_custom_model,
+            base_url_override=x_custom_base_url,
         )
         return WritingChatResponse(**result)
     except ts.TranslationError as exc:
@@ -228,8 +245,13 @@ async def writing_chat_turn(
 async def explain_correction_deep_dive(
     body: DeepDiveExplainRequest,
     auth: AuthenticatedUser = Depends(authenticate_request),
+    x_custom_provider: Optional[str] = Header(None),
+    x_custom_model: Optional[str] = Header(None),
+    x_custom_api_key: Optional[str] = Header(None),
+    x_custom_base_url: Optional[str] = Header(None),
 ):
     """Answer 'Why?' / 'ჩაეძიე' questions about a specific grammar or phrasing correction."""
+    effective_provider = body.provider or x_custom_provider
     try:
         history = [{"role": m.role, "content": m.content} for m in body.history]
         result = await ws.explain_deep_dive(
@@ -240,7 +262,10 @@ async def explain_correction_deep_dive(
             history=history,
             target_language=body.target_language,
             native_language=body.native_language,
-            provider=body.provider,
+            provider=effective_provider,
+            api_key_override=x_custom_api_key,
+            model_override=x_custom_model,
+            base_url_override=x_custom_base_url,
         )
         return DeepDiveExplainResponse(**result)
     except ts.TranslationError as exc:
@@ -256,8 +281,13 @@ async def explain_correction_deep_dive(
 async def translate_writing_word(
     body: WritingTranslateWordRequest,
     auth: AuthenticatedUser = Depends(authenticate_request),
+    x_custom_provider: Optional[str] = Header(None),
+    x_custom_model: Optional[str] = Header(None),
+    x_custom_api_key: Optional[str] = Header(None),
+    x_custom_base_url: Optional[str] = Header(None),
 ):
     """Look up a single word or short phrase from the Writing Studio for saving to Vocabulary."""
+    effective_provider = body.provider or x_custom_provider
     try:
         result = await ts.translate_word(
             word=body.word,
@@ -266,7 +296,10 @@ async def translate_writing_word(
             book_title="Writing Studio",
             source_language=body.source_language,
             target_language=body.target_language,
-            provider=body.provider,
+            provider=effective_provider,
+            api_key_override=x_custom_api_key,
+            model_override=x_custom_model,
+            base_url_override=x_custom_base_url,
         )
         lemma = result.get("lemma", "").strip() or result.get("word", body.word)
         return TranslateWordResponse(

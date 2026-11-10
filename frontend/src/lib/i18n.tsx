@@ -150,6 +150,47 @@ export interface Translations {
   writingOpenEssay: string;
   writingDeleteConfirm: string;
   writingCorrectionsCount: string;
+
+  // Settings & Themes
+  navSettings: string;
+  settingsTitle: string;
+  settingsTabThemes: string;
+  settingsTabTopics: string;
+  settingsTabAi: string;
+  themeCosmic: string;
+  themeSepia: string;
+  themeLight: string;
+  themeMidnight: string;
+  themeEmerald: string;
+  themeCosmicDesc: string;
+  themeSepiaDesc: string;
+  themeLightDesc: string;
+  themeMidnightDesc: string;
+  themeEmeraldDesc: string;
+  readerFontFamilyLabel: string;
+  readerFontSizeLabel: string;
+  targetLevelLabel: string;
+  customTopicsTitle: string;
+  customTopicsDesc: string;
+  customTopicAddBtn: string;
+  customTopicInputPlaceholder: string;
+  customTopicAlreadyExists: string;
+  translationEngineLabel: string;
+  translateIntoLabel: string;
+  uiLanguageLabel: string;
+
+  // BYOK AI Config
+  aiProviderLabel: string;
+  aiModelLabel: string;
+  aiApiKeyLabel: string;
+  aiApiKeyPlaceholder: string;
+  aiApiKeyHint: string;
+  aiBaseUrlLabel: string;
+  aiTestBtn: string;
+  aiTesting: string;
+  aiTestSuccess: string;
+  aiTestFail: string;
+  aiGetKeyLink: string;
 }
 
 const translations: Record<UILanguage, Translations> = {
@@ -301,6 +342,47 @@ const translations: Record<UILanguage, Translations> = {
     writingOpenEssay: '📖 სრულად გახსნა',
     writingDeleteConfirm: 'წავშალოთ ეს თემა ისტორიიდან?',
     writingCorrectionsCount: 'შესწორება',
+
+    // Settings & Themes
+    navSettings: 'პარამეტრები',
+    settingsTitle: 'პარამეტრები & თემები',
+    settingsTabThemes: '🎨 თემები & სტილი',
+    settingsTabTopics: '📚 სასწავლო თემები',
+    settingsTabAi: '🌐 AI & ენა',
+    themeCosmic: 'კოსმოსური ღამე',
+    themeSepia: 'თბილი სეპია (ქაღალდი)',
+    themeLight: 'ნათელი დღე',
+    themeMidnight: 'ღამის ოკეანე',
+    themeEmerald: 'ზურმუხტის ტყე',
+    themeCosmicDesc: 'მუქი იისფერი ნეონის აქცენტებით',
+    themeSepiaDesc: 'მშვიდი კრემისფერი წიგნების საკითხავად',
+    themeLightDesc: 'სუფთა, კონტრასტული დღის ინტერფეისი',
+    themeMidnightDesc: 'ღრმა მუქი ლურჯი მაქსიმალური კონცენტრაციისთვის',
+    themeEmeraldDesc: 'თბილი ბუნებრივი მწვანე თვალის დასასვენებლად',
+    readerFontFamilyLabel: 'კითხვის ძირითადი შრიფტი',
+    readerFontSizeLabel: 'შრიფტის ზომა',
+    targetLevelLabel: 'ინგლისურის სამიზნე დონე (CEFR)',
+    customTopicsTitle: 'თემების მართვა & საკუთარი თემები',
+    customTopicsDesc: 'დაამატეთ თქვენთვის საინტერესო თემები. ისინი გამოჩნდება Discover Hub-სა და Writing Studio-ში AI მასალების გენერირებისთვის.',
+    customTopicAddBtn: '+ დამატება',
+    customTopicInputPlaceholder: 'მაგ: FinTech, Cinema, Philosophy...',
+    customTopicAlreadyExists: 'ეს თემა უკვე დამატებულია',
+    translationEngineLabel: 'AI თარგმნის მოდელი',
+    translateIntoLabel: 'თარგმნის სამიზნე ენა',
+    uiLanguageLabel: 'ინტერფეისის ენა',
+
+    // BYOK AI Config
+    aiProviderLabel: 'AI პროვაიდერი & სისტემა',
+    aiModelLabel: 'სამუშაო მოდელი',
+    aiApiKeyLabel: 'პირადი API Key (BYOK)',
+    aiApiKeyPlaceholder: 'ჩასვით თქვენი API გასაღები (მაგ: AIzaSy...)',
+    aiApiKeyHint: '💡 თუ ცარიელს დატოვებთ, აპლიკაცია გამოიყენებს სისტემურ გასაღებს.',
+    aiBaseUrlLabel: 'Endpoint მისამართი (Base URL)',
+    aiTestBtn: '🔍 გასაღების შემოწმება (Test Connection)',
+    aiTesting: 'მოწმდება...',
+    aiTestSuccess: 'კავშირი წარმატებით დამყარდა!',
+    aiTestFail: 'კავშირი ვერ დამყარდა',
+    aiGetKeyLink: 'გასაღების მიღება ↗',
   },
   en: {
     // Navigation & General
@@ -450,6 +532,47 @@ const translations: Record<UILanguage, Translations> = {
     writingOpenEssay: '📖 Open Full Essay',
     writingDeleteConfirm: 'Delete this essay from history?',
     writingCorrectionsCount: 'corrections',
+
+    // Settings & Themes
+    navSettings: 'Settings',
+    settingsTitle: 'Settings & Themes',
+    settingsTabThemes: '🎨 Themes & Style',
+    settingsTabTopics: '📚 Learning Topics',
+    settingsTabAi: '🌐 AI & Language',
+    themeCosmic: 'Cosmic Night',
+    themeSepia: 'Warm Sepia',
+    themeLight: 'Clean Light',
+    themeMidnight: 'Midnight Ocean',
+    themeEmerald: 'Forest Emerald',
+    themeCosmicDesc: 'Deep dark purple with neon glow',
+    themeSepiaDesc: 'Warm paper feel for comfortable reading',
+    themeLightDesc: 'Clean, crisp modern daylight mode',
+    themeMidnightDesc: 'Deep navy oceanic dark for high focus',
+    themeEmeraldDesc: 'Calming forest emerald green tones',
+    readerFontFamilyLabel: 'Default Reading Font',
+    readerFontSizeLabel: 'Reading Font Size',
+    targetLevelLabel: 'Target English Level (CEFR)',
+    customTopicsTitle: 'Topic Preferences & Custom Interests',
+    customTopicsDesc: 'Add custom topics you care about. They will appear across Discover Hub and Writing Studio to personalize reading materials.',
+    customTopicAddBtn: '+ Add Topic',
+    customTopicInputPlaceholder: 'e.g. FinTech, Cinema, Philosophy...',
+    customTopicAlreadyExists: 'This topic has already been added',
+    translationEngineLabel: 'AI Translation Engine',
+    translateIntoLabel: 'Translate Into',
+    uiLanguageLabel: 'Interface Language',
+
+    // BYOK AI Config
+    aiProviderLabel: 'AI Provider & Engine',
+    aiModelLabel: 'Active AI Model',
+    aiApiKeyLabel: 'Personal API Key (BYOK)',
+    aiApiKeyPlaceholder: 'Paste your API key (e.g. AIzaSy...)',
+    aiApiKeyHint: '💡 Leave blank to automatically use the server default system key.',
+    aiBaseUrlLabel: 'Endpoint Base URL',
+    aiTestBtn: '🔍 Test Connection',
+    aiTesting: 'Verifying...',
+    aiTestSuccess: 'Connection verified successfully!',
+    aiTestFail: 'Connection failed',
+    aiGetKeyLink: 'Get Key ↗',
   },
 };
 

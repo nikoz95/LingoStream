@@ -455,7 +455,30 @@ async def fetch_discover_feed(category: str = "ai") -> List[Dict[str, Any]]:
         items.extend(fiction_items)
 
     else:
-        items.extend(await _fetch_devto_articles("programming", cat, limit=10))
+        # Custom category or topic tag
+        sanitized_tag = re.sub(r'[^a-zA-Z0-9]', '', cat).lower()
+        if sanitized_tag:
+            items.extend(await _fetch_devto_articles(sanitized_tag, cat, limit=8))
+        if len(items) < 4:
+            items.extend(await _fetch_devto_articles("programming", cat, limit=6))
+
+        # Always prepend a dedicated custom topic seed ready for 1-click level adaptation
+        display_topic = category.title()
+        items.insert(
+            0,
+            {
+                "id": f"custom:{sanitized_tag or 'topic'}",
+                "title": f"Deep Dive: {display_topic}",
+                "summary": f"Comprehensive overview and discussion covering core concepts, trends, and real-world insights in {display_topic}.",
+                "category": category,
+                "source_name": "LingoStream AI Curated",
+                "author": "AI Learning Assistant",
+                "reading_time_minutes": 5,
+                "tags": [display_topic, "Custom Topic", "Personalized"],
+                "item_type": "article",
+                "raw_content": f"A comprehensive, highly engaging educational article and discussion about {display_topic}. Explores foundational principles, practical examples, key vocabulary, and future outlook.",
+            },
+        )
 
     # Deduplicate by title
     seen_titles = set()

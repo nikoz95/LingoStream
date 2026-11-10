@@ -81,6 +81,29 @@ async function request<T>(
     headers['Content-Type'] = 'application/json';
   }
 
+  // Inject user's custom AI provider, model and API key headers if configured
+  try {
+    const customProvider = localStorage.getItem('ls_ai_provider');
+    const customModel = localStorage.getItem('ls_ai_model');
+    const customApiKey = localStorage.getItem('ls_ai_api_key');
+    const customBaseUrl = localStorage.getItem('ls_ai_base_url');
+
+    if (customProvider && !headers['X-Custom-Provider']) {
+      headers['X-Custom-Provider'] = customProvider;
+    }
+    if (customModel && !headers['X-Custom-Model']) {
+      headers['X-Custom-Model'] = customModel;
+    }
+    if (customApiKey && !headers['X-Custom-Api-Key']) {
+      headers['X-Custom-Api-Key'] = customApiKey;
+    }
+    if (customBaseUrl && !headers['X-Custom-Base-Url']) {
+      headers['X-Custom-Base-Url'] = customBaseUrl;
+    }
+  } catch {
+    // Ignore in non-browser environments
+  }
+
   const res = await fetch(`${API_BASE}${url}`, {
     ...options,
     headers,
@@ -704,6 +727,30 @@ export async function importDiscoverItem(req: DiscoverImportRequest): Promise<Re
   return request<RegisterBookResponse>('/discover/import', {
     method: 'POST',
     body: JSON.stringify(req),
+  });
+}
+
+// ── AI Configuration & Connection Test ──
+
+export interface TestAiConnectionPayload {
+  provider: string;
+  model?: string;
+  api_key?: string;
+  base_url?: string;
+}
+
+export interface TestAiConnectionResponse {
+  success: boolean;
+  message: string;
+  resolved_provider: string;
+  resolved_model: string;
+  used_custom_key: boolean;
+}
+
+export async function testAiConnection(payload: TestAiConnectionPayload): Promise<TestAiConnectionResponse> {
+  return request<TestAiConnectionResponse>('/ai/test-connection', {
+    method: 'POST',
+    body: JSON.stringify(payload),
   });
 }
 

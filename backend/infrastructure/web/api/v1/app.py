@@ -14,6 +14,7 @@ from infrastructure.web.api.v1.routes.vocabulary_router import router as vocabul
 from infrastructure.web.api.v1.routes.page_router import router as page_router
 from infrastructure.web.api.v1.routes.writing_router import router as writing_router
 from infrastructure.web.api.v1.routes.discover_router import router as discover_router
+from infrastructure.web.api.v1.routes.ai_router import router as ai_router
 
 
 MIGRATIONS = [
@@ -64,6 +65,7 @@ def create_app() -> FastAPI:
     app.include_router(page_router, prefix="/api/v1/pages", tags=["pages"])
     app.include_router(writing_router, prefix="/api/v1/writing", tags=["writing"])
     app.include_router(discover_router, prefix="/api/v1/discover", tags=["discover"])
+    app.include_router(ai_router, prefix="/api/v1/ai", tags=["ai"])
 
     # Health check for deployment platforms (Render, Koyeb, Docker)
     @app.get("/healthz")

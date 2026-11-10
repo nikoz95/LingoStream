@@ -2,7 +2,9 @@ import { useEffect, useState, useCallback, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../lib/auth';
 import { useLanguage } from '../lib/i18n';
+import { useSettings } from '../lib/settings';
 import LanguageToggle from '../components/LanguageToggle';
+import SettingsModal from '../components/SettingsModal';
 import {
   listVocabularyWords,
   deleteVocabularyWord,
@@ -19,6 +21,7 @@ export default function VocabularyPage() {
   const navigate = useNavigate();
   const { logout } = useAuth();
   const { t } = useLanguage();
+  const settings = useSettings();
   const [words, setWords] = useState<VocabularyWord[]>([]);
   const [books, setBooks] = useState<BookListItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -330,6 +333,14 @@ export default function VocabularyPage() {
 
           <div className="flex items-center gap-3">
             <LanguageToggle />
+            <button
+              onClick={settings.openSettings}
+              className="p-2 sm:px-3.5 sm:py-2 text-sm rounded-xl border border-white/15 hover:bg-white/10 hover:border-purple-400/30 transition-all duration-200 flex items-center gap-1.5 cursor-pointer text-white"
+              title={t.navSettings}
+            >
+              <span>⚙️</span>
+              <span className="hidden sm:inline">{t.navSettings}</span>
+            </button>
             <button
               onClick={() => navigate('/writing')}
               className="px-4 py-2 text-sm rounded-xl border border-purple-400/30 bg-purple-500/10 hover:bg-purple-500/20 text-white font-medium transition-colors flex items-center gap-2 cursor-pointer"
@@ -916,6 +927,11 @@ export default function VocabularyPage() {
           </div>
         </div>
       )}
+      {/* Global Settings Modal */}
+      <SettingsModal
+        isOpen={settings.isSettingsOpen}
+        onClose={settings.closeSettings}
+      />
     </div>
   );
 }

@@ -37,6 +37,8 @@ const THEME_BG: Record<EpubTheme, string> = {
   night: '#141518',
   sepia: '#F4ECD8',
   light: '#FAF9F5',
+  emerald: '#052219',
+  midnight: '#0B132B',
 };
 
 const EpubViewer = forwardRef<EpubViewerHandle, EpubViewerProps>(function EpubViewer(

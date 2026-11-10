@@ -1,7 +1,9 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useLanguage } from '../lib/i18n';
+import { useSettings } from '../lib/settings';
 import LanguageToggle from '../components/LanguageToggle';
+import SettingsModal from '../components/SettingsModal';
 import {
   evaluateWriting,
   sendWritingChat,
@@ -109,6 +111,7 @@ const getQuickQuestions = (lang: string) =>
 export default function WritingPage() {
   const navigate = useNavigate();
   const { t, lang } = useLanguage();
+  const settings = useSettings();
   const [mode, setMode] = useState<StudioMode>('free');
 
   const roleplayScenarios = useMemo(() => getRoleplayScenarios(lang), [lang]);
@@ -754,6 +757,14 @@ export default function WritingPage() {
 
         <div className="flex items-center gap-1.5 sm:gap-2.5 shrink-0">
           <LanguageToggle />
+          <button
+            onClick={settings.openSettings}
+            className="p-1.5 sm:px-3 sm:py-2 text-xs sm:text-sm rounded-xl border border-white/15 hover:bg-white/10 transition-all cursor-pointer flex items-center gap-1 text-white"
+            title={t.navSettings}
+          >
+            <span>⚙️</span>
+            <span className="hidden md:inline">{t.navSettings}</span>
+          </button>
           <button
             onClick={() => navigate('/library')}
             className="px-2.5 sm:px-3.5 py-1.5 sm:py-2 text-xs sm:text-sm rounded-xl border border-white/15 hover:bg-white/10 transition-all cursor-pointer"
@@ -1914,6 +1925,11 @@ export default function WritingPage() {
           </div>
         )}
       </main>
+      {/* Global Settings Modal */}
+      <SettingsModal
+        isOpen={settings.isSettingsOpen}
+        onClose={settings.closeSettings}
+      />
     </div>
   );
 }

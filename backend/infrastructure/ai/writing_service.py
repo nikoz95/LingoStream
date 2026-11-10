@@ -150,10 +150,18 @@ async def _call_llm_json(
     messages: List[Dict[str, str]],
     provider: Optional[str] = None,
     temperature: float = 0.3,
+    api_key_override: Optional[str] = None,
+    model_override: Optional[str] = None,
+    base_url_override: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Call the configured LLM provider and parse the JSON response."""
-    effective = provider or settings.LLM_PROVIDER
-    api_key, model, base_url = _resolve_provider(provider)
+    effective = (provider or settings.LLM_PROVIDER or "openai").lower().strip()
+    api_key, model, base_url = _resolve_provider(
+        provider,
+        api_key_override=api_key_override,
+        model_override=model_override,
+        base_url_override=base_url_override,
+    )
 
     if effective == "local":
         payload = {
@@ -202,6 +210,9 @@ async def evaluate_writing(
     target_language: str = "en",
     native_language: str = "ka",
     provider: Optional[str] = None,
+    api_key_override: Optional[str] = None,
+    model_override: Optional[str] = None,
+    base_url_override: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Evaluate free-form writing and return multi-level rewrites, corrections, and vocabulary."""
     tgt_name = _resolve_lang_name(target_language)
@@ -220,7 +231,14 @@ async def evaluate_writing(
     ]
 
     try:
-        data = await _call_llm_json(messages, provider=provider, temperature=0.3)
+        data = await _call_llm_json(
+            messages,
+            provider=provider,
+            temperature=0.3,
+            api_key_override=api_key_override,
+            model_override=model_override,
+            base_url_override=base_url_override,
+        )
         return {
             "corrected_text": data.get("corrected_text", text),
             "natural_spoken_text": data.get("natural_spoken_text", text),
@@ -243,6 +261,9 @@ async def chat_turn(
     target_language: str = "en",
     native_language: str = "ka",
     provider: Optional[str] = None,
+    api_key_override: Optional[str] = None,
+    model_override: Optional[str] = None,
+    base_url_override: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Process a turn in interactive conversation/roleplay and return reply + coaching feedback."""
     tgt_name = _resolve_lang_name(target_language)
@@ -269,7 +290,14 @@ async def chat_turn(
             llm_messages.append({"role": role, "content": msg.get("content", "")})
 
     try:
-        data = await _call_llm_json(llm_messages, provider=provider, temperature=0.5)
+        data = await _call_llm_json(
+            llm_messages,
+            provider=provider,
+            temperature=0.5,
+            api_key_override=api_key_override,
+            model_override=model_override,
+            base_url_override=base_url_override,
+        )
         return {
             "reply": data.get("reply", ""),
             "reply_translation": data.get("reply_translation", ""),
@@ -290,6 +318,9 @@ async def explain_deep_dive(
     target_language: str = "en",
     native_language: str = "ka",
     provider: Optional[str] = None,
+    api_key_override: Optional[str] = None,
+    model_override: Optional[str] = None,
+    base_url_override: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Provide an in-depth grammar & nuance explanation for a specific correction or phrase."""
     tgt_name = _resolve_lang_name(target_language)
@@ -318,7 +349,14 @@ async def explain_deep_dive(
     llm_messages.append({"role": "user", "content": effective_question})
 
     try:
-        data = await _call_llm_json(llm_messages, provider=provider, temperature=0.3)
+        data = await _call_llm_json(
+            llm_messages,
+            provider=provider,
+            temperature=0.3,
+            api_key_override=api_key_override,
+            model_override=model_override,
+            base_url_override=base_url_override,
+        )
         return {
             "answer": data.get("answer", ""),
             "grammar_rule_title": data.get("grammar_rule_title", ""),

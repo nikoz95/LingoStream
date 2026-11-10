@@ -1,6 +1,7 @@
 import { Routes, Route, Navigate } from 'react-router-dom';
 import { useAuth } from './lib/auth';
 import { LanguageProvider } from './lib/i18n';
+import { SettingsProvider } from './lib/settings';
 import LoginPage from './pages/LoginPage';
 import LibraryPage from './pages/LibraryPage';
 import ReaderPage from './pages/ReaderPage';
@@ -26,42 +27,44 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
 export default function App() {
   return (
     <LanguageProvider>
-      <Routes>
-        <Route path="/login" element={<LoginPage />} />
-        <Route
-          path="/library"
-          element={
-            <ProtectedRoute>
-              <LibraryPage />
-            </ProtectedRoute>
-          }
-        />
-        <Route
-          path="/reader/:bookId"
-          element={
-            <ProtectedRoute>
-              <ReaderPage />
-            </ProtectedRoute>
-          }
-        />
-        <Route
-          path="/vocabulary"
-          element={
-            <ProtectedRoute>
-              <VocabularyPage />
-            </ProtectedRoute>
-          }
-        />
-        <Route
-          path="/writing"
-          element={
-            <ProtectedRoute>
-              <WritingPage />
-            </ProtectedRoute>
-          }
-        />
-        <Route path="*" element={<Navigate to="/library" replace />} />
-      </Routes>
+      <SettingsProvider>
+        <Routes>
+          <Route path="/login" element={<LoginPage />} />
+          <Route
+            path="/library"
+            element={
+              <ProtectedRoute>
+                <LibraryPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/reader/:bookId"
+            element={
+              <ProtectedRoute>
+                <ReaderPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/vocabulary"
+            element={
+              <ProtectedRoute>
+                <VocabularyPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/writing"
+            element={
+              <ProtectedRoute>
+                <WritingPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route path="*" element={<Navigate to="/library" replace />} />
+        </Routes>
+      </SettingsProvider>
     </LanguageProvider>
   );
 }

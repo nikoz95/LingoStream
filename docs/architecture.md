@@ -82,12 +82,15 @@ frontend/src/
 │   ├── MobileTranslationSheet.tsx                  # Mobile bottom sheet for translations
 │   ├── MobileLoupe.tsx                             # Touch magnifier for mobile text selection
 │   ├── SearchPanel.tsx                             # In-book search sidebar
-│   ├── SettingsModal.tsx                           # Typography, theme, and AI provider settings
+│   ├── SettingsModal.tsx                           # Global & reader settings: themes, scalable topics, CEFR level & AI providers
 │   ├── ThumbnailSidebar.tsx                        # Chapter/page navigation sidebar
+│   ├── LanguageToggle.tsx                          # Georgian / English UI toggle button
 │   └── LoadingSpinner.tsx                          # Reusable spinner component
 └── lib/
     ├── api.ts                                      # All backend API calls & token refresh interceptor
     ├── auth.tsx                                    # AuthContext & useAuth hook
+    ├── i18n.tsx                                    # LanguageProvider, useLanguage, dictionary
+    ├── settings.tsx                                # SettingsProvider, useSettings (themes, CEFR, custom topics, fonts)
     ├── textPicker.ts                               # Word & sentence boundary detection on click/drag
     └── reader/
         ├── EpubEngine.ts                           # foliate-js integration & styling engine

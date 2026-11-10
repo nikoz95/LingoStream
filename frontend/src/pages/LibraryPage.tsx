@@ -13,8 +13,10 @@ import {
   type CefrLevel,
 } from '../lib/api';
 import { useLanguage, type Translations } from '../lib/i18n';
+import { useSettings } from '../lib/settings';
 import LanguageToggle from '../components/LanguageToggle';
 import LoadingSpinner from '../components/LoadingSpinner';
+import SettingsModal from '../components/SettingsModal';
 
 const ACCEPTED_TYPES = '.pdf,.epub';
 const ACCEPTED_MIME = ['application/pdf', 'application/epub+zip'];
@@ -55,6 +57,7 @@ const getCefrLevels = (t: Translations): { level: CefrLevel; label: string; desc
 export default function LibraryPage() {
   const navigate = useNavigate();
   const { t, lang } = useLanguage();
+  const settings = useSettings();
   const [activeTab, setActiveTab] = useState<'library' | 'discover'>('library');
   const [books, setBooks] = useState<BookListItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -71,10 +74,17 @@ export default function LibraryPage() {
   // Modal / Import state
   const [selectedItem, setSelectedItem] = useState<DiscoverFeedItem | null>(null);
   const [importMode, setImportMode] = useState<DiscoverMode>('adapted');
-  const [cefrLevel, setCefrLevel] = useState<CefrLevel>('B1');
+  const [cefrLevel, setCefrLevel] = useState<CefrLevel>(settings.targetCefr || 'B1');
   const [includeOriginal, setIncludeOriginal] = useState<boolean>(true);
   const [importing, setImporting] = useState<boolean>(false);
   const [importError, setImportError] = useState<string>('');
+
+  // Synchronize default CEFR level with settings
+  useEffect(() => {
+    if (settings.targetCefr) {
+      setCefrLevel(settings.targetCefr);
+    }
+  }, [settings.targetCefr]);
 
   // Custom prompt generator state
   const [customTitle, setCustomTitle] = useState('');
@@ -264,6 +274,14 @@ export default function LibraryPage() {
         <div className="flex items-center gap-3">
           <LanguageToggle />
           <button
+            onClick={settings.openSettings}
+            className="px-3.5 py-2 text-sm rounded-xl border border-white/15 hover:bg-white/10 hover:border-purple-400/30 transition-all duration-200 flex items-center gap-1.5 cursor-pointer text-white"
+            title={t.navSettings}
+          >
+            <span>⚙️</span>
+            <span className="hidden sm:inline">{t.navSettings}</span>
+          </button>
+          <button
             onClick={() => navigate('/writing')}
             className="px-4 py-2 text-sm rounded-xl border border-purple-400/30 bg-purple-500/10 hover:bg-purple-500/20 hover:border-purple-400/50 transition-all duration-200 flex items-center gap-2 cursor-pointer"
           >
@@ -452,9 +470,9 @@ export default function LibraryPage() {
               </div>
             </div>
 
-            {/* Category Pills */}
+            {/* Category Pills (Standard + User Custom Topics) */}
             <div className="space-y-2.5">
-              <div className="flex flex-wrap gap-2">
+              <div className="flex flex-wrap items-center gap-2">
                 {categories.map(cat => {
                   const isActive = selectedCategory === cat.id;
                   return (
@@ -472,6 +490,35 @@ export default function LibraryPage() {
                     </button>
                   );
                 })}
+
+                {/* User-defined Custom Topics from Settings */}
+                {settings.customTopics.map(ct => {
+                  const isActive = selectedCategory === ct;
+                  return (
+                    <button
+                      key={ct}
+                      onClick={() => setSelectedCategory(ct)}
+                      className={`px-3.5 py-2 rounded-xl text-xs font-medium transition-all cursor-pointer flex items-center gap-1.5 border ${
+                        isActive
+                          ? 'bg-gradient-to-r from-purple-600/40 to-pink-600/40 border-pink-400 text-white shadow-sm shadow-pink-500/25'
+                          : 'bg-white/5 border-purple-400/20 text-purple-200 hover:bg-purple-500/10 hover:text-white'
+                      }`}
+                    >
+                      <span>🏷️</span>
+                      <span>{ct}</span>
+                    </button>
+                  );
+                })}
+
+                {/* Shortcut to manage topics in Settings */}
+                <button
+                  onClick={settings.openSettings}
+                  className="px-2.5 py-1.5 text-xs text-purple-300 hover:text-white rounded-xl hover:bg-white/10 transition-colors cursor-pointer flex items-center gap-1 border border-dashed border-purple-400/30"
+                  title={t.customTopicsTitle}
+                >
+                  <span>⚙️</span>
+                  <span>+ {t.navSettings}</span>
+                </button>
               </div>
             </div>
 
@@ -731,6 +778,11 @@ export default function LibraryPage() {
           </div>
         </div>
       )}
+      {/* Global Settings Modal */}
+      <SettingsModal
+        isOpen={settings.isSettingsOpen}
+        onClose={settings.closeSettings}
+      />
     </div>
   );
 }

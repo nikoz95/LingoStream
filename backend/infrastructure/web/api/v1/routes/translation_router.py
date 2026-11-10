@@ -1,7 +1,8 @@
 """Routes for translating text passages via AI providers."""
 import logging
 
-from fastapi import APIRouter, Depends, HTTPException
+from typing import Optional
+from fastapi import APIRouter, Depends, Header, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from config.settings import settings
@@ -48,6 +49,10 @@ async def translate_passage(
     body: TranslatePassageRequest,
     auth: AuthenticatedUser = Depends(authenticate_request),
     db: AsyncSession = Depends(get_session),
+    x_custom_provider: Optional[str] = Header(None),
+    x_custom_model: Optional[str] = Header(None),
+    x_custom_api_key: Optional[str] = Header(None),
+    x_custom_base_url: Optional[str] = Header(None),
 ):
     """Translate a selected passage from a chapter using the chosen AI provider."""
     book = await _verify_book_ownership(book_id, auth.user.id, db)
@@ -72,6 +77,8 @@ async def translate_passage(
     left = "\n".join(p.content for p in all_paragraphs if min_idx - context_window <= p.index < min_idx)
     right = "\n".join(p.content for p in all_paragraphs if max_idx < p.index <= max_idx + context_window)
 
+    effective_provider = body.provider or x_custom_provider
+
     try:
         translation = await ts.translate(
             passage=passage,
@@ -79,7 +86,10 @@ async def translate_passage(
             right_context=right,
             book_title=book.title,
             source_language=book.language,
-            provider=body.provider,
+            provider=effective_provider,
+            api_key_override=x_custom_api_key,
+            model_override=x_custom_model,
+            base_url_override=x_custom_base_url,
         )
     except ts.TranslationError:
         logger.exception("Translation failed for book=%d chapter=%d", book_id, chapter_id)
@@ -88,7 +98,7 @@ async def translate_passage(
     return TranslatePassageResponse(
         passage=passage,
         translation=translation,
-        provider=body.provider or settings.LLM_PROVIDER,
+        provider=effective_provider or settings.LLM_PROVIDER,
     )
 
 
@@ -102,9 +112,14 @@ async def translate_text(
     body: TranslateTextRequest,
     auth: AuthenticatedUser = Depends(authenticate_request),
     db: AsyncSession = Depends(get_session),
+    x_custom_provider: Optional[str] = Header(None),
+    x_custom_model: Optional[str] = Header(None),
+    x_custom_api_key: Optional[str] = Header(None),
+    x_custom_base_url: Optional[str] = Header(None),
 ):
     """Translate arbitrary selected text from a book (no chapter DB lookup needed)."""
     book = await _verify_book_ownership(book_id, auth.user.id, db)
+    effective_provider = body.provider or x_custom_provider
 
     try:
         translation = await ts.translate(
@@ -113,7 +128,10 @@ async def translate_text(
             right_context="",
             book_title=book.title,
             source_language=body.language or book.language,
-            provider=body.provider,
+            provider=effective_provider,
+            api_key_override=x_custom_api_key,
+            model_override=x_custom_model,
+            base_url_override=x_custom_base_url,
         )
     except ts.TranslationError:
         logger.exception("Translation failed for book=%d (free text)", book_id)
@@ -122,7 +140,7 @@ async def translate_text(
     return TranslateTextResponse(
         source_text=body.text,
         translated_text=translation,
-        provider=body.provider or settings.LLM_PROVIDER,
+        provider=effective_provider or settings.LLM_PROVIDER,
     )
 
 
@@ -136,9 +154,14 @@ async def translate_word_endpoint(
     body: TranslateWordRequest,
     auth: AuthenticatedUser = Depends(authenticate_request),
     db: AsyncSession = Depends(get_session),
+    x_custom_provider: Optional[str] = Header(None),
+    x_custom_model: Optional[str] = Header(None),
+    x_custom_api_key: Optional[str] = Header(None),
+    x_custom_base_url: Optional[str] = Header(None),
 ):
     """Translate a single word to Georgian with phonetic, definition, sentence context."""
     book = await _verify_book_ownership(book_id, auth.user.id, db)
+    effective_provider = body.provider or x_custom_provider
 
     try:
         result = await ts.translate_word(
@@ -148,7 +171,10 @@ async def translate_word_endpoint(
             book_title=body.book_title or book.title,
             source_language=body.source_language or book.language,
             target_language=body.target_language or "ka",
-            provider=body.provider,
+            provider=effective_provider,
+            api_key_override=x_custom_api_key,
+            model_override=x_custom_model,
+            base_url_override=x_custom_base_url,
         )
     except ts.TranslationError:
         logger.exception("Word translation failed for book=%d word=%s", book_id, body.word)
@@ -162,5 +188,5 @@ async def translate_word_endpoint(
         definition=result.get("definition", ""),
         sentence_context=result.get("sentence_context", ""),
         sentence_context_translated=result.get("sentence_context_translated", ""),
-        provider=body.provider or settings.LLM_PROVIDER,
+        provider=effective_provider or settings.LLM_PROVIDER,
     )

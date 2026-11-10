@@ -87,18 +87,39 @@ def _clean_translation(text: str) -> str:
     return text.strip('"').strip("'").strip()
 
 
-def _resolve_provider(provider: Optional[str] = None):
+def _resolve_provider(
+    provider: Optional[str] = None,
+    api_key_override: Optional[str] = None,
+    model_override: Optional[str] = None,
+    base_url_override: Optional[str] = None,
+):
     """Return (api_key, model, base_url) for the given or default provider."""
-    effective = provider or settings.LLM_PROVIDER
+    effective = (provider or settings.LLM_PROVIDER or "openai").lower().strip()
 
-    if effective == "gemini":
-        key = settings.GEMINI_API_KEY or settings.LLM_API_KEY
-        return key, settings.GEMINI_MODEL, settings.GEMINI_BASE_URL
+    if effective in ("gemini", "google"):
+        key = api_key_override or settings.GEMINI_API_KEY or settings.LLM_API_KEY
+        model = model_override or settings.GEMINI_MODEL or "gemini-2.5-flash"
+        base_url = base_url_override or settings.GEMINI_BASE_URL or "https://generativelanguage.googleapis.com/v1beta/openai/"
+        return key, model, base_url
     if effective == "deepseek":
-        return settings.DEEPSEEK_API_KEY, settings.DEEPSEEK_MODEL, settings.DEEPSEEK_BASE_URL
+        key = api_key_override or settings.DEEPSEEK_API_KEY
+        model = model_override or settings.DEEPSEEK_MODEL or "deepseek-chat"
+        base_url = base_url_override or settings.DEEPSEEK_BASE_URL or "https://api.deepseek.com/v1"
+        return key, model, base_url
     if effective == "local":
-        return "", settings.LOCAL_MODEL, settings.LOCAL_BASE_URL
-    return settings.LLM_API_KEY, settings.LLM_MODEL, settings.LLM_BASE_URL
+        model = model_override or settings.LOCAL_MODEL or "mistral"
+        base_url = base_url_override or settings.LOCAL_BASE_URL or "http://localhost:11434"
+        return "", model, base_url
+    if effective == "openai":
+        key = api_key_override or settings.LLM_API_KEY
+        model = model_override or settings.LLM_MODEL or "gpt-4o-mini"
+        base_url = base_url_override or (settings.LLM_BASE_URL if "generativelanguage" not in settings.LLM_BASE_URL else "https://api.openai.com/v1")
+        return key, model, base_url
+
+    key = api_key_override or settings.LLM_API_KEY
+    model = model_override or settings.LLM_MODEL
+    base_url = base_url_override or settings.LLM_BASE_URL
+    return key, model, base_url
 
 
 def _fallback_models_for(primary_model: str, base_url: str) -> list[str]:
@@ -213,6 +234,9 @@ async def translate(
     source_language: str = "en",
     target_language: str = "ka",
     provider: Optional[str] = None,
+    api_key_override: Optional[str] = None,
+    model_override: Optional[str] = None,
+    base_url_override: Optional[str] = None,
 ) -> str:
     """Translate a passage of text.
 
@@ -223,17 +247,25 @@ async def translate(
         book_title: Title of the book for LLM context.
         source_language: Language code of the source text.
         target_language: Language code of target translation.
-        provider: Override provider (``"gemini"``, ``"deepseek"``, ``"local"``, or ``None`` for default).
+        provider: Override provider ("gemini", "deepseek", "openai", "local", or None for default).
 
     Returns:
         The translated text.
     """
     effective = provider or settings.LLM_PROVIDER
-    cache_key = _get_cache_key([passage, left_context, right_context, source_language, target_language, effective])
+    cache_key = _get_cache_key([
+        passage, left_context, right_context, source_language, target_language,
+        effective, model_override or "", base_url_override or ""
+    ])
     if cache_key in _CACHE:
         return _CACHE[cache_key]
 
-    api_key, model, base_url = _resolve_provider(provider)
+    api_key, model, base_url = _resolve_provider(
+        provider,
+        api_key_override=api_key_override,
+        model_override=model_override,
+        base_url_override=base_url_override,
+    )
     src_name = _resolve_lang_name(source_language)
     tgt_name = _resolve_lang_name(target_language)
 
@@ -264,6 +296,9 @@ async def translate_word(
     source_language: str = "en",
     target_language: str = "ka",
     provider: Optional[str] = None,
+    api_key_override: Optional[str] = None,
+    model_override: Optional[str] = None,
+    base_url_override: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Translate a single word with lemma, phonetic, definition, and sentence context.
 
@@ -280,11 +315,19 @@ async def translate_word(
         Dict with keys: word, lemma, translation, phonetic, definition, sentence_context, sentence_context_translated.
     """
     effective = provider or settings.LLM_PROVIDER
-    cache_key = _get_cache_key([word, left_context, right_context, source_language, target_language, effective])
+    cache_key = _get_cache_key([
+        word, left_context, right_context, source_language, target_language,
+        effective, model_override or "", base_url_override or ""
+    ])
     if cache_key in _CACHE:
         return _CACHE[cache_key]
 
-    api_key, model, base_url = _resolve_provider(provider)
+    api_key, model, base_url = _resolve_provider(
+        provider,
+        api_key_override=api_key_override,
+        model_override=model_override,
+        base_url_override=base_url_override,
+    )
     src_name = _resolve_lang_name(source_language)
     tgt_name = _resolve_lang_name(target_language)
 

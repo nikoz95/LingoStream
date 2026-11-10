@@ -58,3 +58,14 @@ Use this file to jump directly to the files implementing a feature without searc
 - **Frontend i18n Context & Dictionary:** `frontend/src/lib/i18n.tsx` (`LanguageProvider`, `useLanguage`, type-safe translations dictionary)
 - **UI Language Switcher Component:** `frontend/src/components/LanguageToggle.tsx` (toggle between Georgian `ka` 🇬🇪 and English `en` 🇬🇧, persisted in `localStorage`)
 - **Covered Views:** Header navigation, Library & Discover Hub (`LibraryPage.tsx`), Vocabulary (`VocabularyPage.tsx`), Writing Studio (`WritingPage.tsx`).
+
+## 7. Global Settings, Visual Themes & Scalable Content Topics
+- **Frontend Settings Context:** `frontend/src/lib/settings.tsx` (`SettingsProvider`, `useSettings`) managing:
+  - **Visual Themes (`data-theme`):** `cosmic` (Cosmic Dark Purple), `sepia` (Warm Paper), `light` (Clean Daylight), `midnight` (Ocean Deep Blue), `emerald` (Forest Green).
+  - **Scalable Content Topics:** Custom topics manager allowing users to add/delete any custom subject (e.g. FinTech, Cinema, Philosophy) which automatically populate Discover Hub category pills and personalizes feed generation.
+  - **Learning CEFR Level:** Synchronized default CEFR target level (`A2`, `B1`, `B2`, `C1`).
+  - **Reader & AI Config:** Reading font family (`literata`, `sans`, `georgia`, `mono`), font size slider, and target language (`ka`, `en`, `de`, `fr`, `es`, `ru`).
+  - **BYOK (Bring Your Own Key) & AI Models:** Select provider (**Google Gemini**, **DeepSeek**, **OpenAI**, **Local / Ollama**), choose or customize models (`gemini-2.5-flash`, `gemini-2.5-pro`, `deepseek-chat`, `gpt-4o-mini`, etc.), and optionally provide a personal API Key (`localStorage`). Blank uses system server defaults. Includes **Test Connection** button (`POST /api/v1/ai/test-connection`).
+- **Modal Component:** `frontend/src/components/SettingsModal.tsx` accessible from navigation headers on all main pages (`LibraryPage`, `WritingPage`, `VocabularyPage`, `ReaderPage`).
+- **Dynamic Themes CSS:** `frontend/src/index.css` via custom properties and palette tokens.
+- **Backend Custom Topic Feed & AI Routes:** `backend/infrastructure/ai/discover_service.py`, `backend/infrastructure/web/api/v1/routes/ai_router.py`.
